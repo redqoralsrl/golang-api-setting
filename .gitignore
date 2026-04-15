@@ -4,3 +4,4 @@
 /tmp
 data
 /cmd/api/tmp
+.DS_Store
