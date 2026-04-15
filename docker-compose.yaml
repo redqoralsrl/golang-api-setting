@@ -1,0 +1,74 @@
+services:
+  api:
+    container_name: api
+    build: .
+    ports:
+      - "8080:8080"
+      - "2345:2345"
+    env_file:
+      - .env.local
+    volumes:
+      - .:/app
+    deploy:
+      resources:
+        limits:
+          cpus: "2" 
+          memory: "4G" 
+        reservations:
+          cpus: "1"
+          memory: "1G"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "10"
+    networks:
+      - go-network
+    depends_on:
+      - db
+      - cache_db
+
+  db:
+    container_name: db
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - ./data:/var/lib/postgresql/data
+      - ./ops/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    deploy:
+      resources:
+        limits:
+          cpus: "2" 
+          memory: "4G" 
+        reservations:
+          cpus: "1" 
+          memory: "1G" 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "10"
+    ports:
+      - "5432:5432"
+    networks:
+      - go-network
+
+  cache_db:
+    container_name: cache_db
+    image: redis:8.2-alpine
+    command: redis-server
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - go-network
+
+networks:
+  go-network:
+    driver: bridge
+
+  

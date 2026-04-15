@@ -1,0 +1,6 @@
+.env.local
+.evn.development
+.env.production
+/tmp
+data
+/cmd/api/tmp

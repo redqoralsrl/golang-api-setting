@@ -1,0 +1,33 @@
+FROM golang:1.26.1 AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y ca-certificates git
+
+ENV CGO_ENABLED=0 \
+    GOFLAGS=-buildvcs=false \
+    GOPROXY=https://proxy.golang.org,direct \
+    GODEBUG=http2client=0
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o main ./cmd/api
+
+FROM alpine:3.22
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /app/main /app/main
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/main"]
