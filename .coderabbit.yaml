@@ -1,0 +1,248 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# CodeRabbit가 남기는 리뷰/채팅 메시지 언어입니다.
+# 한국어로 받기 위해 ko-KR 로 설정합니다.
+language: "ko-KR"
+
+# 리뷰 말투에 대한 전역 지시입니다.
+# "무엇을 우선 지적할지"를 알려주는 문장이라고 보면 됩니다.
+# 여기서는 스타일 잡담보다 버그, 보안, 회귀 위험, 테스트 누락을 우선 보게 합니다.
+tone_instructions: "한국어로 간결하고 단호하게, 버그·보안·회귀 위험·테스트 누락 중심으로 리뷰하고 취향성 스타일 지적은 최소화하세요."
+
+reviews:
+  # 리뷰 강도입니다.
+  # chill 은 비교적 가볍게 보고, assertive 는 더 적극적으로 문제를 찾습니다.
+  profile: "assertive"
+
+  # CodeRabbit 코멘트가 해결되고 pre-merge check 까지 통과해야
+  # 최종적으로 '문제 없음' 상태로 넘어가게 하는 워크플로입니다.
+  # 엄격 운영을 원해서 true 로 둡니다.
+  request_changes_workflow: true
+
+  # PR 변경 내용을 상위 수준에서 요약해줍니다.
+  # 리뷰 들어가기 전에 전체 맥락 파악하기 좋습니다.
+  high_level_summary: true
+
+  # 위 요약을 walkthrough 코멘트 안에도 넣습니다.
+  # PR 본문만 보지 않아도 리뷰 댓글에서 요약을 볼 수 있습니다.
+  high_level_summary_in_walkthrough: true
+
+  # "리뷰 시작", "스킵됨", "완료" 같은 상태 메시지를 남깁니다.
+  review_status: true
+
+  # 어떤 파일을 무시했는지, 어떤 추가 문맥을 썼는지 같은
+  # 내부 리뷰 상세 정보를 더 많이 보여줍니다.
+  # 왜 어떤 파일엔 코멘트가 없었는지 추적하기 쉬워집니다.
+  review_details: true
+
+  # walkthrough 코멘트를 접을 수 있게 만들어서 댓글이 너무 길어지는 것을 막습니다.
+  collapse_walkthrough: true
+
+  # 변경 파일 목록과 간단한 설명을 walkthrough 에 포함합니다.
+  changed_files_summary: true
+
+  # 시퀀스 다이어그램 자동 생성 여부입니다.
+  # API 서버/백엔드 코드에서는 노이즈가 될 때가 많아 껐습니다.
+  sequence_diagrams: false
+
+  # 이 PR 을 읽는 데 대략 얼마나 걸릴지 추정치를 보여줍니다.
+  estimate_code_review_effort: true
+
+  # 링크된 이슈를 실제로 얼마나 해결했는지 평가합니다.
+  # 이슈 기반 개발이면 꽤 유용합니다.
+  assess_linked_issues: true
+
+  # 관련 이슈 자동 추천 여부입니다.
+  # 지금은 과한 연결 노이즈를 줄이기 위해 끕니다.
+  related_issues: false
+
+  # 관련 PR 자동 추천 여부입니다.
+  related_prs: false
+
+  # PR 라벨 추천 기능입니다.
+  # 팀에서 라벨 자동화가 아직 없으면 오히려 잡음이 될 수 있어 껐습니다.
+  suggested_labels: false
+
+  # 리뷰어 추천 기능입니다.
+  # 팀 규모가 작거나 리뷰어를 사람이 직접 지정하면 굳이 필요 없어서 껐습니다.
+  suggested_reviewers: false
+
+  # 리뷰 도중 fortune 메시지 같은 장식성 출력을 남길지 여부입니다.
+  in_progress_fortune: false
+
+  # walkthrough 에 시를 넣는 기능입니다.
+  poem: false
+
+  # AI 에이전트용 추가 프롬프트 섹션을 리뷰 코멘트에 붙이는 기능입니다.
+  # 현재는 사람이 리뷰 읽는 데 집중하고 싶어서 껐습니다.
+  enable_prompt_for_ai_agents: false
+
+  # 리뷰 대상에서 빼고 싶은 경로입니다.
+  # ! 로 시작하면 "제외" 의미입니다.
+  # 생성 파일이나 산출물은 여기서 빼야 쓸데없는 리뷰가 줄어듭니다.
+  # TODO: 생성 된 파일들은 여기 추가 필요
+  path_filters:
+    # Swagger 생성 결과물
+    - "!docs/api/**"
+    # sqlc 생성 결과물
+    - "!internal/database/postgresql/gen/**"
+    # solidity 관련 바이너리/생성 코드
+    - "!internal/blockchain/erc20/solidity/**"
+
+  # 경로별 추가 리뷰 지침입니다.
+  # "이 폴더 파일을 볼 때는 이런 관점으로 더 집중해라" 라고 알려주는 용도입니다.
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Prioritize correctness, nil safety, context propagation, error handling, and regression risk.
+        Always call out missing tests when behavior changes, especially when public handlers, middleware, or database logic are modified.
+        Avoid style-only comments unless they materially improve maintainability.
+
+    - path: "internal/http/chi/**/*.go"
+      instructions: |
+        Focus on request validation, auth and authorization behavior, HTTP status codes, cookie/header security, and response consistency.
+        Call out cases where handler behavior, swagger annotations, and registered routes drift apart.
+        Flag response contracts that are ambiguous for frontend or client consumers.
+
+    - path: "internal/http/chi/middleware/**/*.go"
+      instructions: |
+        Focus on auth bypass risk, secure cookie flags, CORS and security header correctness, rate-limit behavior, and logging of secrets or personal data.
+        Treat accidental weakening of security behavior as high severity.
+
+    - path: "domain/**/*.go"
+      instructions: |
+        Focus on business invariants, transaction boundaries, idempotency, and domain error semantics.
+        Pay extra attention to context usage inside transactions: code running in a transaction should use the transactional context instead of an outer request context.
+        Treat swallowed errors or partial-success flows as important findings when they can hide data consistency issues.
+
+    - path: "**/postgresql/**/*.go"
+      instructions: |
+        Focus on sqlc or pq error mapping, query parameter correctness, transaction participation, and handling of zero rows or constraint violations.
+        Flag cases where repository code can silently operate outside the active transaction.
+
+    - path: "**/*.sql"
+      instructions: |
+        Focus on migration safety, constraints, indexes, nullability, data backfill needs, and whether schema changes remain backward-compatible with existing application code.
+        Flag destructive or non-reversible schema changes unless they are clearly intentional and documented.
+
+    - path: "config/**/*.go"
+      instructions: |
+        Focus on insecure defaults, missing required env validation, stage-specific behavior drift, and secret handling.
+
+    - path: "Dockerfile*"
+      instructions: |
+        Focus on deterministic builds, image size, unnecessary packages, secret handling, and dev/prod parity issues.
+
+    - path: "docker-compose.yaml"
+      instructions: |
+        Focus on exposed ports, env handling, startup ordering, health checks, and configuration mismatches between compose services and the Go application.
+
+  auto_review:
+    # PR 생성/업데이트 시 자동으로 리뷰를 돌릴지 여부입니다.
+    enabled: true
+
+    # 새 커밋이 push 될 때마다 증분 리뷰를 다시 돌립니다.
+    # 고친 뒤 재검토를 바로 받기 좋습니다.
+    auto_incremental_review: true
+
+    # 몇 개 커밋까지 자동 리뷰한 뒤 pause 할지 정합니다.
+    # 0 이면 멈추지 않고 계속 봅니다.
+    auto_pause_after_reviewed_commits: 0
+
+    # draft PR 도 자동 리뷰할지 여부입니다.
+    # 보통 draft 는 아직 작업 중이므로 false 로 두는 편이 낫습니다.
+    drafts: false
+
+    # 제목에 아래 키워드가 있으면 자동 리뷰를 건너뜁니다.
+    # 아직 정리 안 된 PR 을 자동 리뷰하는 것을 막는 용도입니다.
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "DRAFT"
+
+  finishing_touches:
+    # 변경 코드에 docstring 을 자동 제안/생성하는 기능입니다.
+    # 현재 레포는 이보다 실제 로직 리뷰가 더 중요해서 끕니다.
+    docstrings:
+      enabled: false
+
+    # 테스트 생성 기능입니다.
+    # 테스트 파일이 적은 레포라 켜두는 편이 실용적입니다.
+    unit_tests:
+      enabled: true
+
+    # 리팩터/단순화 제안 기능입니다.
+    # 엄격 리뷰와 섞이면 과한 코멘트가 생길 수 있어 현재는 끕니다.
+    simplify:
+      enabled: false
+
+  pre_merge_checks:
+    # PR 제목 규칙 검사입니다.
+    # mode: error 이면 기준에 맞지 않을 때 merge 전에 해결해야 합니다.
+    title:
+      mode: "error"
+      requirements: "Use a concise and specific title that explains the user-facing change or technical intent. Avoid vague titles like fix, update, test, or refactor only."
+
+    # PR 설명 품질 검사입니다.
+    # 설명이 너무 비어 있거나 불충분하면 merge 전에 잡히게 됩니다.
+    description:
+      mode: "error"
+
+    # docstring 커버리지 검사입니다.
+    # 현재 레포 운영 방식과 맞지 않아 껐습니다.
+    docstrings:
+      mode: "off"
+
+chat:
+  # 멘션 없이도 CodeRabbit 가 댓글에 자동 답변할지 여부입니다.
+  # 필요할 때만 @coderabbitai 로 부르는 쪽이 깔끔해서 false 입니다.
+  auto_reply: false
+
+  # 아스키 아트/장식성 출력을 허용할지 여부입니다.
+  art: false
+
+knowledge_base:
+  web_search:
+    # 리뷰 중 외부 웹 검색을 허용할지 여부입니다.
+    # 레포 내부 문맥 위주로 보게 하려면 false 가 안전합니다.
+    enabled: false
+
+  code_guidelines:
+    # 팀 규칙 문서를 리뷰 기준으로 사용할지 여부입니다.
+    enabled: true
+
+    # 아래 파일이 있으면 CodeRabbit 가 읽어서 팀 규칙으로 활용합니다.
+    # 아직 파일이 없어도 미리 패턴을 잡아두는 건 괜찮습니다.
+    filePatterns:
+      - "AGENTS.md"
+      - ".github/copilot-instructions.md"
+      - ".github/instructions/**"
+      - "**/.cursor/rules/**"
+
+  learnings:
+    # CodeRabbit 가 학습한 패턴 범위를 어디까지 쓸지 정합니다.
+    # local 은 이 저장소 안에서만 학습/재사용합니다.
+    scope: "local"
+
+  issues:
+    # 이슈 문맥도 이 저장소 로컬 범위만 사용합니다.
+    scope: "local"
+
+  pull_requests:
+    # 과거 PR 문맥도 이 저장소 로컬 범위만 사용합니다.
+    scope: "local"
+
+code_generation:
+  unit_tests:
+    # 테스트 생성도 경로마다 스타일을 다르게 지시할 수 있습니다.
+    path_instructions:
+      - path: "domain/**/*.go"
+        instructions: |
+          Generate table-driven tests that cover success cases, validation failures, repository failures, JWT failures, and transaction failures.
+          Prefer mocks or fakes over real database or network dependencies.
+          Verify domain errors with errors.Is or equivalent behavior-based assertions.
+
+      - path: "internal/http/chi/**/*.go"
+        instructions: |
+          Prefer httptest-based handler tests that assert status codes, response bodies, validation errors, and cookie or header behavior.
+          Include tests for unauthorized, invalid input, and internal error paths when handlers branch on them.
