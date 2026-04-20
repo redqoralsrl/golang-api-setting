@@ -1,6 +1,6 @@
 # Makefile
 # include .env.local
-.PHONY: help create-swagger test test-cover mocks build local-run dev-run logs lint sqlc tools-upgrade
+.PHONY: help create-swagger test test-cover mocks build local-run dev-run logs lint sqlc domain tools-upgrade
 
 help: ## This help dialog.
 	@IFS=$$'\n' ; \
@@ -53,6 +53,10 @@ lint: ## Run linter
 
 sqlc: ## Generate sqlc
 	go tool sqlc generate
+
+domain: ## Generate domain skeleton from init.sql. ex) make domain table=v1.notices name=notice
+	go run ./generator -table=$(table) -name=$(name)
+	gofmt -w ./domain/$(name)
 
 tools-upgrade: ## Go tool setting
 	go get -tool github.com/air-verse/air@latest
