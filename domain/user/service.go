@@ -62,5 +62,8 @@ func (s *Service) Create(ctx context.Context, email, password string) (*User, er
 		return nil, err
 	}
 
+	UsersCreatedTotal.Inc()
+	UsersLoginTotal.Inc()
+
 	return user, nil
 }

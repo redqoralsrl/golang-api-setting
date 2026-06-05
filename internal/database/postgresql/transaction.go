@@ -12,7 +12,11 @@ type transactionKeyType string
 const transactionKey transactionKeyType = "dbTx"
 
 func NewContextWithTransaction(ctx context.Context, tx *sql.Tx, cursorInstance *Cursor) context.Context {
-	dbTx := &Database{tx, gen.New(tx), cursorInstance}
+	dbTx := &Database{
+		Querier: tx,
+		Queries: gen.New(tx),
+		cursor:  cursorInstance,
+	}
 	return context.WithValue(ctx, transactionKey, dbTx)
 }
 

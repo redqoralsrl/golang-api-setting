@@ -7,6 +7,7 @@ import (
 	"go-template/config"
 	"go-template/internal/database/postgresql/gen"
 	"go-template/internal/logger"
+	"go-template/internal/metrics"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -25,6 +26,7 @@ type Database struct {
 	Querier
 	Queries *gen.Queries //sqlc로 생성된 쿼리
 	cursor  *Cursor
+	done    chan struct{}
 }
 
 type Querier interface {
@@ -62,7 +64,16 @@ func NewDB(config *config.Config, l logger.Logger) (*Database, error) {
 			cursorInstance := NewCursor(cursorSecret)
 
 			if err == nil {
-				return &Database{db, gen.New(db), cursorInstance}, nil
+				database := &Database{
+					Querier: db,
+					Queries: gen.New(db),
+					cursor:  cursorInstance,
+					done:    make(chan struct{}),
+				}
+				database.recordStats()
+				go database.observeStats(10 * time.Second)
+
+				return database, nil
 			}
 		}
 		l.Warn("Failed to connect to the database. Retrying...", logger.NewField("error", err), logger.NewField("backoff", backoff))
@@ -79,7 +90,26 @@ func NewDB(config *config.Config, l logger.Logger) (*Database, error) {
 }
 
 func (d *Database) Close() error {
+	close(d.done)
 	return d.Querier.(*sql.DB).Close()
+}
+
+func (d *Database) observeStats(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			d.recordStats()
+		case <-d.done:
+			return
+		}
+	}
+}
+
+func (d *Database) recordStats() {
+	metrics.RecordDatabaseStats(d.Querier.(*sql.DB).Stats())
 }
 
 func (d *Database) GetQueryRowerFromContext(ctx context.Context) *Database {

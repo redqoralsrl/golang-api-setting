@@ -22,6 +22,13 @@ var (
 	skipLoggingPaths = []string{
 		"/health",
 		"/ping",
+		"/metrics",
+		"/swagger/index.html",
+		"/swagger/swagger-ui.css",
+		"/swagger/swagger-ui-bundle.js",
+		"/swagger/swagger-ui-standalone-preset.js",
+		"/swagger/doc.json",
+		"/swagger/favicon-32x32.png",
 	}
 
 	// 바디를 로깅하지 않을 엔드포인트 목록
