@@ -16,6 +16,7 @@ make sqlc            # Regenerate type-safe SQL code from .sql files → interna
 make create-swagger  # Regenerate Swagger docs from handler annotations
 make mocks           # Regenerate mocks via mockery
 make domain          # Scaffold a new domain skeleton from DB schema
+make proto           # Generate gRPC code from .proto files
 
 # Build
 make build           # Build production Docker image (linux/amd64)
@@ -40,6 +41,7 @@ This project follows **Clean Architecture** with a DDD-inspired domain layer. De
 
 **`internal/`** — Shared infrastructure adapters:
 - `database/postgresql/` — DB connection with retry logic, context-based transaction manager (`transaction.go`), pagination cursor encryption
+- `grpc/pb/` — Generated gRPC code from protobuf definitions
 - `http/chi/` — Chi router setup, route groups (system/public/app/admin), handler files per domain
 - `http/chi/middleware/` — CORS, security headers, rate limiting (30 req/s), panic recovery, request logging, JWT auth, cookie auth
 - `http/response.go` — Unified JSON response envelope: `{ code, message, error, data }`
@@ -62,6 +64,8 @@ This project follows **Clean Architecture** with a DDD-inspired domain layer. De
 **New domain**: Run `make domain` to scaffold the skeleton, then implement the interfaces defined in `<domain>.go`.
 
 **Swagger**: Annotate handlers with `swaggo` comments, then run `make create-swagger`. Swagger UI is only mounted in dev stage, behind basic auth (`SWAGGER_ID`/`SWAGGER_PASSWORD`).
+
+**gRPC**: Define service definitions in `proto/<domain>/v1/<domain>.proto`, run `make proto` to generate Go code in `internal/grpc/pb/`, then implement the generated service interfaces.
 
 ### Environment
 
