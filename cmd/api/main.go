@@ -6,16 +6,19 @@ import (
 	errorlogPostgresql "go-template/domain/errorlog/postgresql"
 	"go-template/internal/api"
 	"go-template/internal/database/postgresql"
+	usergrpc "go-template/internal/grpc/user"
 	"go-template/internal/jwt"
 	"go-template/internal/logger"
 	"go-template/internal/logger/zerolog"
 	"go-template/internal/validator"
+	userv1 "go-template/proto/user/v1"
 
 	"go-template/domain/user"
 	userPostgresql "go-template/domain/user/postgresql"
 	stdHandler "go-template/internal/http/chi"
 
 	_ "github.com/lib/pq"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -83,6 +86,22 @@ func main() {
 	}
 
 	s := stdHandler.NewApiRouter(&services, conf, v, jwtAdapter, l)
+
+	// grpc 사용시
+	go func() {
+		err := api.StartGRPC(l, conf.GRPCPort, func(grpcServer *grpc.Server) {
+			userv1.RegisterUserServiceServer(
+				grpcServer,
+				usergrpc.NewServer(userService),
+			)
+		})
+		if err != nil {
+			l.Fatal("Failed to start gRPC server", logger.Field{
+				Key:   "error",
+				Value: err.Error(),
+			})
+		}
+	}()
 
 	err = api.Start(l, conf.APIPort, s)
 	if err != nil {

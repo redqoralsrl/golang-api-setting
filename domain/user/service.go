@@ -39,7 +39,7 @@ func (s *Service) Create(ctx context.Context, email, password string) (*User, er
 
 	var user *User
 	if err := s.transactionManager.WithTransaction(ctx, sql.LevelReadCommitted, false, func(txCtx context.Context) error {
-		user, err = s.repo.Create(ctx, email, string(passwordHash))
+		user, err = s.repo.Create(txCtx, email, string(passwordHash))
 		if err != nil {
 			s.logger.Error("failed to create user", logger.Field{Key: "error", Value: err.Error()})
 			return NewDatabaseError("create user", err)
@@ -52,7 +52,7 @@ func (s *Service) Create(ctx context.Context, email, password string) (*User, er
 
 		user.AccessToken = accessToken
 
-		err = s.repo.CreateLoginLog(ctx, user.ID)
+		err = s.repo.CreateLoginLog(txCtx, user.ID)
 		if err != nil {
 			s.logger.Error("failed to create user login log", logger.Field{Key: "error", Value: err.Error()})
 		}

@@ -6,6 +6,7 @@ import (
 )
 
 type Config struct {
+	GRPCPort        string
 	Stage           string
 	DBUser          string
 	DBPassword      string
@@ -45,6 +46,7 @@ func (c *Config) JobsEnabled() bool {
 
 func LoadConfig() *Config {
 	return &Config{
+		GRPCPort:        os.Getenv("GRPC_PORT"),
 		Stage:           os.Getenv("STAGE"),
 		DBUser:          os.Getenv("DB_USER"),
 		DBPassword:      os.Getenv("DB_PASSWORD"),

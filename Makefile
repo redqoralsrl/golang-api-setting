@@ -1,6 +1,6 @@
 # Makefile
 # include .env.local
-.PHONY: help create-swagger test test-cover mocks build local-run dev-run logs lint sqlc domain tools-upgrade
+.PHONY: help create-swagger test test-cover mocks build local-run dev-run logs lint sqlc domain tools-upgrade proto
 
 help: ## This help dialog.
 	@IFS=$$'\n' ; \
@@ -63,3 +63,9 @@ tools-upgrade: ## Go tool setting
 	go get -tool github.com/swaggo/swag/cmd/swag@latest
 	go get -tool github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 	go mod tidy
+
+proto: ## Generate protobuf files
+	protoc \
+		--go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		proto/user/v1/user.proto
