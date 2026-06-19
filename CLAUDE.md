@@ -4,71 +4,152 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+### Development
 ```bash
-# Development
-make local-run       # Start API + PostgreSQL + Redis via Docker Compose with .env.local
-make lint            # Run golangci-lint run ./...
-make test            # go test -v ./...
-make test-cover      # Generate coverage.html
+# Hot reload (air)
+go tool air -c ./cmd/api/.air.toml
 
-# Code generation (run after changing SQL queries or adding new domains)
-make sqlc            # Regenerate type-safe SQL code from .sql files → internal/database/postgresql/gen/
-make create-swagger  # Regenerate Swagger docs from handler annotations
-make mocks           # Regenerate mocks via mockery
-make domain          # Scaffold a new domain skeleton from DB schema
-make proto           # Generate gRPC code from .proto files
+# Run directly
+go run ./cmd/api
 
-# Build
-make build           # Build production Docker image (linux/amd64)
+# Full stack (API + PostgreSQL + Redis + Prometheus + Grafana)
+make local-run
+
+# DB + Redis only (run app locally)
+docker compose --env-file .env.local up -d db cache_db
 ```
 
-Hot reload in local dev is provided by `air` (configured in `cmd/api/.air.toml`).
+### Build & Test
+```bash
+make build        # Production Docker image (linux/amd64)
+make test         # All tests with verbose output
+make test-cover   # HTML coverage report
+make lint         # golangci-lint (errcheck, goconst, govet, staticcheck, unused)
+```
+
+### Code Generation
+```bash
+make sqlc           # Generate DB queries from domain/*/postgresql/query.sql
+make proto          # Generate protobuf from proto/user/v1/user.proto
+make create-swagger # Generate Swagger docs from internal/http/chi/api_handler.go
+make tools-upgrade  # Install/upgrade air, swag, sqlc
+```
 
 ## Architecture
 
-This project follows **Clean Architecture** with a DDD-inspired domain layer. Dependencies flow inward: HTTP → Service → Repository.
+Dual-protocol server: **HTTP REST** (Chi v5) + **gRPC** (port 8888). Entry point is `cmd/api/main.go`.
 
-### Layers
+### Layer Structure
 
-**`cmd/api/main.go`** — Entry point. Wires all dependencies manually (no DI framework): logger → DB → transaction manager → repositories → services → HTTP router → server.
-
-**`domain/`** — Core business logic. Each domain (e.g., `user`, `errorlog`) contains:
-- `<domain>.go` — interfaces (Repository, UseCase) and models
-- `error.go` — domain-specific errors mapped from PostgreSQL error codes
-- `service.go` — UseCase implementation (business logic, bcrypt, JWT calls)
-- `postgresql/storage.go` — Repository implementation using sqlc-generated queries
-- `postgresql/query.sql` — Named SQL queries consumed by `make sqlc`
-
-**`internal/`** — Shared infrastructure adapters:
-- `database/postgresql/` — DB connection with retry logic, context-based transaction manager (`transaction.go`), pagination cursor encryption
-- `grpc/pb/` — Generated gRPC code from protobuf definitions
-- `http/chi/` — Chi router setup, route groups (system/public/app/admin), handler files per domain
-- `http/chi/middleware/` — CORS, security headers, rate limiting (30 req/s), panic recovery, request logging, JWT auth, cookie auth
-- `http/response.go` — Unified JSON response envelope: `{ code, message, error, data }`
-- `jwt/` — HS256 JWT with custom claims (UserID, Role)
-- `logger/` — Interface with zerolog implementation (console+color in dev, JSON in prod)
-- `validator/` — `go-playground/validator` wrapper with translation support
-
-**`config/config.go`** — All configuration loaded from environment variables (no config files at runtime). See `.env.template` for required vars.
-
-**`ops/db/init.sql`** — PostgreSQL schema. Two schemas: `v1` (API) and `admin`. Run automatically when using `make local-run`.
+```
+cmd/api/           → DI wiring, server startup
+config/            → env-based config (os.Getenv)
+domain/<name>/     → service interface, entity types, domain errors
+  postgresql/      → repository implementation (sqlc-generated queries)
+internal/
+  http/chi/        → HTTP handlers + route registration
+    middleware/    → CORS, auth, logging, metrics, rate limit, recovery
+  grpc/<name>/     → gRPC service implementations
+  database/postgresql/ → connection, transaction manager, cursor encryption
+    gen/           → sqlc-generated query structs
+  jwt/             → HS256 token generation/validation
+  metrics/         → Prometheus registries (HTTP, DB, per-domain)
+  logger/zerolog/  → structured logging (console dev, JSON prod)
+ops/
+  db/init.sql      → schema
+  prometheus/      → scrape config (5s interval)
+  grafana/         → dashboards
+proto/user/v1/     → protobuf definitions
+```
 
 ### Key Patterns
 
-**Transactions**: Use `TransactionManager` from `internal/database/postgresql/transaction.go`. Pass `context.Context` through the call chain; the transaction manager attaches the `*sql.Tx` to the context so nested calls reuse it automatically.
+**Dependency Injection**: Constructor-based, no framework. `main.go` wires: config → logger → DB → repos → services → handlers → router.
 
-**SQL queries**: Never write raw SQL in Go files. Add named queries to `domain/<name>/postgresql/query.sql`, run `make sqlc`, then call the generated querier from `storage.go`.
+**Repository pattern**: Each domain defines `Reader`, `Writer`, and `Repository` interfaces in `domain/<name>/<name>.go`. PostgreSQL implementations live in `domain/<name>/postgresql/storage.go` and use sqlc-generated queries via `queryRower.Queries.*`.
 
-**Error handling**: Map PostgreSQL error codes to domain errors in `domain/<name>/error.go`. Handlers convert domain errors to HTTP responses using `internal/http/response.go` helpers.
+**Transaction support**: `WithTransaction(ctx, isolationLevel, readOnly, fn)` wraps operations in a DB transaction and injects the tx into context. Repositories call `db.GetQueryRowerFromContext(ctx)` to pick up the transaction automatically.
 
-**New domain**: Run `make domain` to scaffold the skeleton, then implement the interfaces defined in `<domain>.go`.
+**Route groups** (`internal/http/chi/api_handler.go`):
+- `/` — health, swagger, metrics (public)
+- `/api/v1` — public endpoints (e.g. user registration)
+- `/api/v1/app` — authenticated endpoints (JWT middleware applied)
+- `/admin` — reserved
 
-**Swagger**: Annotate handlers with `swaggo` comments, then run `make create-swagger`. Swagger UI is only mounted in dev stage, behind basic auth (`SWAGGER_ID`/`SWAGGER_PASSWORD`).
+**Error mapping**: Domain errors are defined in `domain/<name>/error.go`; PostgreSQL error codes are mapped to domain errors in the repository layer. HTTP handlers switch on error type to produce the correct status code.
 
-**gRPC**: Define service definitions in `proto/<domain>/v1/<domain>.proto`, run `make proto` to generate Go code in `internal/grpc/pb/`, then implement the generated service interfaces.
+**Cursor-based pagination**: Cursors are AES-encrypted (`internal/database/postgresql/cursor.go`) before being sent to clients.
 
-### Environment
+### Middleware Stack (applied in order)
 
-- `STAGE=dev` enables debug logging, relaxed CORS, Swagger UI, and disables background jobs
-- Required env vars are documented in `.env.template`
-- Local dev uses `.env.local`; Docker dev container uses `.env.development`
+`RequestID` → `RealIP` → `CORSMiddleware` → `SecurityHeadersMiddleware` → `BodyLimitMiddleware` (10 MB) → `RateLimitMiddleware` (30 req/s per IP) → `RecoveryMiddleware` → `LoggerMiddleware` → `MetricsMiddleware`
+
+`LoggerMiddleware` skips health/metrics/swagger paths, flags slow requests (>1s), detects scanning probes, and persists errors (HTTP ≥ 400, excluding 401/403/404/405/503) to the `v1.error_log` table.
+
+### Auth
+
+JWT (HS256) stored in an `HttpOnly` cookie (`SameSite=Lax`, `Secure` in prod). Claims carry `user_id` and `role`. `RequireRole()` middleware enforces RBAC. Token default expiry: 1 hour.
+
+### Monitoring
+
+Prometheus metrics exposed at `/metrics`. Per-domain metric files (`domain/<name>/metrics.go`) register domain-level counters. DB connection pool stats are scraped every 10 seconds.
+
+### Database
+
+PostgreSQL with exponential-backoff connection (500 ms → 60 s, 10 attempts). Pool: 15 idle / 30 max open. SSL disabled in dev, required in prod (driven by `STAGE` env var).
+
+### gRPC
+
+Started in a goroutine from `main.go`. Port controlled by `GRPC_PORT`. TLS and JWT metadata auth are not yet implemented (noted as TODO in `internal/api/grpc.go`).
+
+## Environment Variables
+
+Copy `.env.template` to `.env.local`. Key variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `STAGE` | `dev` / `staging` / `prod` |
+| `API_HOST`, `API_PORT` | HTTP server bind |
+| `GRPC_PORT` | gRPC server port |
+| `DB_*` | PostgreSQL connection |
+| `REDIS_HOST`, `REDIS_PORT` | Redis connection |
+| `API_SECRET_KEY` | JWT signing key (≥32 chars) |
+| `CURSOR_SECRET` | Cursor encryption key (exactly 32 chars) |
+| `API_X_API_KEY` | Required `X-API-Key` header |
+| `SWAGGER_ID`, `SWAGGER_PASSWORD` | Basic auth for `/swagger/*` |
+
+## 새 도메인 추가 순서
+
+1. `domain/<name>/` 폴더 생성
+   - `<name>.go` - Repository/UseCase 인터페이스 + Model struct
+   - `service.go` - UseCase 구현체
+   - `error.go` - 도메인 에러 (PostgreSQL 에러코드 매핑)
+   - `postgresql/storage.go` - Repository 구현체
+   - `postgresql/query.sql` - SQL 쿼리 (make sqlc로 생성)
+
+2. `internal/http/chi/<name>.go` 생성
+   - Handler struct + 생성자 함수 (UseCase, validator, logger 주입)
+   - 각 엔드포인트 함수 (Swagger 주석 포함)
+
+3. `cmd/api/main.go` 수정
+   - storage → service → handler 순서로 wiring 추가
+
+## 금지 사항
+
+- Go 파일 안에 raw SQL 작성 금지 → 반드시 query.sql에 작성 후 make sqlc
+- DI 프레임워크 사용 금지 → cmd/api/main.go에서 수동 wiring
+- 도메인 레이어에서 외부 패키지 직접 임포트 금지 (인터페이스로 추상화)
+
+## 트랜잭션 사용법
+
+TransactionManager를 context에 붙여서 전달한다.
+service.go에서 직접 Begin/Commit 하지 않음.
+
+// 올바른 방법
+func (s *service) SomeOperation(ctx context.Context) error {
+    return s.txManager.WithTransaction(ctx, func(ctx context.Context) error {
+        // ctx 안에 tx가 들어있음
+        if err := s.repo.DoA(ctx); err != nil { return err }
+        return s.repo.DoB(ctx)
+    })
+}
