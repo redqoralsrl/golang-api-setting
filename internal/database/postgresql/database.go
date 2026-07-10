@@ -7,7 +7,6 @@ import (
 	"go-template/config"
 	"go-template/internal/database/postgresql/gen"
 	"go-template/internal/logger"
-	"go-template/internal/metrics"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -27,6 +26,7 @@ type Database struct {
 	Queries *gen.Queries //sqlc로 생성된 쿼리
 	cursor  *Cursor
 	done    chan struct{}
+	logger  logger.Logger
 }
 
 type Querier interface {
@@ -69,6 +69,7 @@ func NewDB(config *config.Config, l logger.Logger) (*Database, error) {
 					Queries: gen.New(db),
 					cursor:  cursorInstance,
 					done:    make(chan struct{}),
+					logger:  l,
 				}
 				database.recordStats()
 				go database.observeStats(10 * time.Second)
@@ -109,7 +110,14 @@ func (d *Database) observeStats(interval time.Duration) {
 }
 
 func (d *Database) recordStats() {
-	metrics.RecordDatabaseStats(d.Querier.(*sql.DB).Stats())
+	stats := d.Querier.(*sql.DB).Stats()
+	d.logger.Info("Database connection pool stats",
+		logger.NewField("idle", stats.Idle),
+		logger.NewField("in_use", stats.InUse),
+		logger.NewField("open", stats.OpenConnections),
+		logger.NewField("wait_count", stats.WaitCount),
+		logger.NewField("wait_duration", stats.WaitDuration.String()),
+	)
 }
 
 func (d *Database) GetQueryRowerFromContext(ctx context.Context) *Database {

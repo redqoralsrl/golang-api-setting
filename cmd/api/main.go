@@ -87,21 +87,21 @@ func main() {
 
 	s := stdHandler.NewApiRouter(&services, conf, v, jwtAdapter, l)
 
-	// grpc 사용시
-	go func() {
-		err := api.StartGRPC(l, conf.GRPCPort, func(grpcServer *grpc.Server) {
-			userv1.RegisterUserServiceServer(
-				grpcServer,
-				usergrpc.NewServer(userService),
-			)
-		})
-		if err != nil {
-			l.Fatal("Failed to start gRPC server", logger.Field{
-				Key:   "error",
-				Value: err.Error(),
-			})
-		}
-	}()
+	// // grpc 사용시
+	// go func() {
+	// 	err := api.StartGRPC(l, conf.GRPCPort, func(grpcServer *grpc.Server) {
+	// 		userv1.RegisterUserServiceServer(
+	// 			grpcServer,
+	// 			usergrpc.NewServer(userService),
+	// 		)
+	// 	})
+	// 	if err != nil {
+	// 		l.Fatal("Failed to start gRPC server", logger.Field{
+	// 			Key:   "error",
+	// 			Value: err.Error(),
+	// 		})
+	// 	}
+	// }()
 
 	err = api.Start(l, conf.APIPort, s)
 	if err != nil {

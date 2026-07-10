@@ -12,7 +12,7 @@ go tool air -c ./cmd/api/.air.toml
 # Run directly
 go run ./cmd/api
 
-# Full stack (API + PostgreSQL + Redis + Prometheus + Grafana)
+# Full stack (API + PostgreSQL + Redis)
 make local-run
 
 # DB + Redis only (run app locally)
@@ -48,17 +48,14 @@ domain/<name>/     → service interface, entity types, domain errors
   postgresql/      → repository implementation (sqlc-generated queries)
 internal/
   http/chi/        → HTTP handlers + route registration
-    middleware/    → CORS, auth, logging, metrics, rate limit, recovery
+    middleware/    → CORS, auth, logging, rate limit, recovery
   grpc/<name>/     → gRPC service implementations
   database/postgresql/ → connection, transaction manager, cursor encryption
     gen/           → sqlc-generated query structs
   jwt/             → HS256 token generation/validation
-  metrics/         → Prometheus registries (HTTP, DB, per-domain)
   logger/zerolog/  → structured logging (console dev, JSON prod)
 ops/
   db/init.sql      → schema
-  prometheus/      → scrape config (5s interval)
-  grafana/         → dashboards
 proto/user/v1/     → protobuf definitions
 ```
 
@@ -71,7 +68,7 @@ proto/user/v1/     → protobuf definitions
 **Transaction support**: `WithTransaction(ctx, isolationLevel, readOnly, fn)` wraps operations in a DB transaction and injects the tx into context. Repositories call `db.GetQueryRowerFromContext(ctx)` to pick up the transaction automatically.
 
 **Route groups** (`internal/http/chi/api_handler.go`):
-- `/` — health, swagger, metrics (public)
+- `/` — health, swagger (public)
 - `/api/v1` — public endpoints (e.g. user registration)
 - `/api/v1/app` — authenticated endpoints (JWT middleware applied)
 - `/admin` — reserved
@@ -82,9 +79,9 @@ proto/user/v1/     → protobuf definitions
 
 ### Middleware Stack (applied in order)
 
-`RequestID` → `RealIP` → `CORSMiddleware` → `SecurityHeadersMiddleware` → `BodyLimitMiddleware` (10 MB) → `RateLimitMiddleware` (30 req/s per IP) → `RecoveryMiddleware` → `LoggerMiddleware` → `MetricsMiddleware`
+`RequestID` → `RealIP` → `CORSMiddleware` → `SecurityHeadersMiddleware` → `BodyLimitMiddleware` (10 MB) → `RateLimitMiddleware` (30 req/s per IP) → `RecoveryMiddleware` → `LoggerMiddleware`
 
-`LoggerMiddleware` skips health/metrics/swagger paths, flags slow requests (>1s), detects scanning probes, and persists errors (HTTP ≥ 400, excluding 401/403/404/405/503) to the `v1.error_log` table.
+`LoggerMiddleware` skips health/swagger paths, flags slow requests (>1s), detects scanning probes, and persists errors (HTTP ≥ 400, excluding 401/403/404/405/503) to the `v1.error_log` table.
 
 ### Auth
 
@@ -92,7 +89,7 @@ JWT (HS256) stored in an `HttpOnly` cookie (`SameSite=Lax`, `Secure` in prod). C
 
 ### Monitoring
 
-Prometheus metrics exposed at `/metrics`. Per-domain metric files (`domain/<name>/metrics.go`) register domain-level counters. DB connection pool stats are scraped every 10 seconds.
+No metrics backend (Prometheus/Grafana removed). DB connection pool stats (idle/in-use/open/wait) are logged every 10 seconds via `internal/database/postgresql/database.go`.
 
 ### Database
 

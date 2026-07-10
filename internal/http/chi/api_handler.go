@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"golang.org/x/time/rate"
 )
@@ -38,9 +37,6 @@ func NewApiRouter(services *Services, conf *config.Config, v validator.Validatio
 	// 모니터링 미들웨어
 	r.Use(middleware.RecoveryMiddleware(logger))
 	r.Use(middleware.LoggerMiddleware(logger, services.ErrorLogService))
-
-	// metrics
-	r.Use(middleware.MetricsMiddleware)
 
 	// auth 설정
 	authMiddleware := middleware.NewAuthMiddleware(j, conf.IsDev())
@@ -85,8 +81,6 @@ func NewApiRouter(services *Services, conf *config.Config, v validator.Validatio
 	if conf.IsDev() {
 		system.With(swaggerAuthMiddleware.Authenticate).Get("/swagger/*", httpSwagger.Handler(httpSwagger.InstanceName("api")))
 	}
-
-	r.Handle("/metrics", promhttp.Handler())
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		response.WriteResponse(w, http.StatusOK, response.Success, nil, map[string]string{

@@ -22,7 +22,6 @@ var (
 	skipLoggingPaths = []string{
 		"/health",
 		"/ping",
-		"/metrics",
 		"/swagger/index.html",
 		"/swagger/swagger-ui.css",
 		"/swagger/swagger-ui-bundle.js",

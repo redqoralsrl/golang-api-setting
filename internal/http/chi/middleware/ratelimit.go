@@ -62,8 +62,8 @@ func RateLimitMiddleware(rps rate.Limit, burst int) func(http.Handler) http.Hand
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 메트릭, 헬스체크는 rate limit 제외
-			if r.URL.Path == "/metrics" || r.URL.Path == "/health" {
+			// 헬스체크는 rate limit 제외
+			if r.URL.Path == "/health" {
 				next.ServeHTTP(w, r)
 				return
 			}
