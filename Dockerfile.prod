@@ -1,33 +1,28 @@
-FROM golang:1.26.1 AS builder
+# syntax=docker/dockerfile:1
+# 운영 이미지. CGO 없이 정적 빌드해 distroless(nonroot)에서 실행한다.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+ARG VERSION=dev
 
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y ca-certificates git
-
-ENV CGO_ENABLED=0 \
-    GOFLAGS=-buildvcs=false \
-    GOPROXY=https://proxy.golang.org,direct \
-    GODEBUG=http2client=0
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/api ./cmd/api
 
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o main ./cmd/api
+# ca-certificates, tzdata 포함. 쉘이 없고 nonroot(65532)로 실행된다.
+FROM gcr.io/distroless/static-debian12:nonroot
 
-FROM alpine:3.22
-
-WORKDIR /app
-
-RUN apk add --no-cache ca-certificates tzdata
-
-COPY --from=builder /app/main /app/main
+COPY --from=builder /out/api /api
 
 EXPOSE 8080
+USER nonroot:nonroot
 
-ENTRYPOINT ["/app/main"]
+ENTRYPOINT ["/api"]

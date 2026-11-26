@@ -82,13 +82,13 @@ func run(command string, args []string) error {
 			return err
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "STATE\tAPPLIED AT\tFILE")
+		_, _ = fmt.Fprintln(w, "STATE\tAPPLIED AT\tFILE")
 		for _, s := range statuses {
 			applied := "-"
 			if !s.AppliedAt.IsZero() {
 				applied = s.AppliedAt.UTC().Format(time.DateTime)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\n", s.State, applied, s.Source.Path)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", s.State, applied, s.Source.Path)
 		}
 		return w.Flush()
 	default:

@@ -31,7 +31,7 @@ func NewError(err error) Field {
 	if err == nil {
 		return Field{Key: "error", Value: nil}
 	}
-	// lib/pq 는 실행 중인 쿼리가 취소되면 context.Canceled 대신 이 서버 오류를 돌려준다.
+	// 실행 중인 쿼리가 취소되면 드라이버에 따라 context.Canceled 대신 PostgreSQL 서버 오류(57014)가 온다.
 	canceled := errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "canceling statement due to user request")
 	return Field{Key: "error", Value: err.Error(), Canceled: canceled}
 }

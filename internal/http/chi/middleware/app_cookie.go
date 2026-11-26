@@ -22,7 +22,7 @@ func SetAppAuthCookie(w http.ResponseWriter, token string, expiresAt time.Time, 
 		maxAge = 0
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure 는 dev(http localhost)에서만 끈다
 		Name:     AppAuthCookieName,
 		Value:    strings.TrimSpace(token),
 		Path:     appAuthCookiePath,
@@ -38,7 +38,7 @@ func ClearAppAuthCookie(w http.ResponseWriter, isDev bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure 는 dev(http localhost)에서만 끈다
 		Name:     AppAuthCookieName,
 		Value:    "",
 		Path:     appAuthCookiePath,
