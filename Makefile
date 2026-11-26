@@ -9,7 +9,7 @@ WITH_ENV = set -a && . ./$(ENV_FILE) && set +a &&
 .DEFAULT_GOAL := help
 .PHONY: help dev run local-run db-up down logs \
 	migrate-up migrate-down migrate-status migrate-create \
-	sqlc create-swagger generate domain proto \
+	sqlc create-swagger generate domain \
 	test test-cover lint vuln check build tools-upgrade
 
 help: ## 사용 가능한 명령 목록
@@ -61,11 +61,6 @@ domain: ## 테이블로 도메인 뼈대 생성. ex) make domain table=v1.notice
 	go run ./generator -table=$(table) -name=$(name)
 	gofmt -w ./domain/$(name)
 
-PROTO_FILES := $(wildcard proto/*/v1/*.proto)
-proto: ## protobuf 생성 (gRPC 사용 시, GRPC.md)
-	protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative $(PROTO_FILES)
-
 ## ---------- 검사 ----------
 test: ## 테스트 (race)
 	go test -race ./...
@@ -82,7 +77,6 @@ vuln: ## 알려진 취약점 검사
 
 check: lint test ## CI 와 같은 검사
 	go tool sqlc diff
-	go build -tags grpc ./...
 
 ## ---------- 빌드 ----------
 build: ## 운영 Docker 이미지 (linux/amd64)

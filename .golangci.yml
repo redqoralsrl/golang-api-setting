@@ -35,7 +35,6 @@ linters:
     paths:
       - internal/database/postgresql/gen
       - docs
-      - proto
       - internal/blockchain/erc20/solidity
 
 issues:

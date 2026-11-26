@@ -24,7 +24,6 @@ type Config struct {
 
 	APIHost string
 	APIPort string
-	// GRPCPort string // gRPC 미사용. 활성화 방법은 GRPC.md
 
 	DB Database
 

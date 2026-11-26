@@ -20,10 +20,6 @@ import (
 	"go-template/internal/logger/zerolog"
 	"go-template/internal/validator"
 	"go-template/migrations"
-	// gRPC 미사용. 활성화 방법은 GRPC.md
-	// usergrpc "go-template/internal/grpc/user"
-	// userv1 "go-template/proto/user/v1"
-	// "google.golang.org/grpc"
 )
 
 // version 빌드 시 -ldflags "-X main.version=..." 로 넣는다 (Dockerfile.prod)
@@ -112,17 +108,6 @@ func run() error {
 	}
 
 	router := stdHandler.NewApiRouter(&services, conf, v, jwtAdapter, l, db.Ping)
-
-	// gRPC 사용 시 주석 해제 (GRPC.md 참고)
-	// go func() {
-	// 	err := api.StartGRPC(l, conf.GRPCPort, func(grpcServer *grpc.Server) {
-	// 		userv1.RegisterUserServiceServer(grpcServer, usergrpc.NewServer(userService))
-	// 	})
-	// 	if err != nil {
-	// 		l.Error("Failed to start gRPC server", logger.NewError(err))
-	// 		stop()
-	// 	}
-	// }()
 
 	if err := api.Serve(ctx, l, conf.APIPort, router); err != nil {
 		l.Error("Server stopped with error", logger.NewError(err))
