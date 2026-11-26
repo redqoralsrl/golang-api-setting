@@ -9,10 +9,9 @@ WITH_ENV = set -a && . ./$(ENV_FILE) && set +a &&
 COMPOSE  = docker compose --env-file $(ENV_FILE)
 
 .DEFAULT_GOAL := help
-.PHONY: help dev run local-run db-up down logs \
+.PHONY: help dev local-run db-up down logs \
 	migrate-up migrate-down migrate-status migrate-create \
-	sqlc create-swagger generate domain \
-	test test-cover lint vuln check build tools-upgrade
+	sqlc create-swagger test lint build tools-upgrade
 
 help: ## 사용 가능한 명령 목록
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -20,9 +19,6 @@ help: ## 사용 가능한 명령 목록
 ## ---------- 실행 ----------
 dev: ## 로컬에서 hot reload 실행 (DB 는 make db-up)
 	$(WITH_ENV) go tool air -c cmd/api/.air.toml
-
-run: ## 로컬에서 한 번 실행
-	$(WITH_ENV) go run ./cmd/api
 
 local-run: ## docker compose 로 API + DB 실행 후 로그 보기
 	$(COMPOSE) up -d --build && $(COMPOSE) logs -f api
@@ -57,30 +53,13 @@ sqlc: ## migrations/ 와 */query.sql 로 DB 코드 생성
 create-swagger: ## Swagger 문서 생성 (docs/api)
 	go tool swag init -g ./internal/http/chi/api_handler.go -o ./docs/api --parseDependency --parseInternal --instanceName api
 
-generate: sqlc create-swagger ## sqlc + swagger
-
-domain: ## 테이블로 도메인 뼈대 생성. ex) make domain table=v1.notices name=notice
-	go run ./generator -table=$(table) -name=$(name)
-	gofmt -w ./domain/$(name)
-
-## ---------- 검사 ----------
+## ---------- 검사·빌드 ----------
 test: ## 테스트 (race)
 	go test -race ./...
-
-test-cover: ## 커버리지 리포트 (coverage.html)
-	go test -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
 
 lint: ## golangci-lint (bin/, 없으면 make tools-upgrade)
 	./bin/golangci-lint run ./...
 
-vuln: ## 알려진 취약점 검사
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-
-check: lint test ## CI 와 같은 검사
-	go tool sqlc diff
-
-## ---------- 빌드 ----------
 build: ## 운영 Docker 이미지 (linux/amd64)
 	docker build -f Dockerfile.prod --platform linux/amd64 --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
 

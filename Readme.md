@@ -83,15 +83,15 @@ make sqlc             # 스키마가 바뀌었으면 쿼리 코드 다시 생성
 
 ```bash
 make help             # 전체 목록
-make dev | run | local-run | db-up | down | logs
+make dev | local-run | db-up | down | logs
 make migrate-up | migrate-down | migrate-status | migrate-create name=...
-make sqlc | create-swagger | generate | domain table=v1.x name=x
-make test | test-cover | lint | vuln | check
+make sqlc | create-swagger
+make test | lint
 make build            # 운영 이미지 (distroless, nonroot)
 make tools-upgrade    # air, swag, sqlc, golangci-lint
 ```
 
-CI(`.github/workflows/ci.yml`): build, vet, test -race, sqlc diff, govulncheck, golangci-lint, 운영 이미지 빌드.
+push 하면 CI(`.github/workflows/ci.yml`)가 검사한다: build, vet, test -race, sqlc diff, govulncheck, golangci-lint, 운영 이미지 빌드.
 
 ## Project Structure
 

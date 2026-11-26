@@ -29,9 +29,6 @@ linters:
       # 테스트는 반복 문자열이 읽기 쉽다
       - path: _test\.go
         linters: [goconst]
-      # 로컬 개발 도구 (임의 경로 읽기·파일 쓰기가 목적)
-      - path: ^generator/
-        linters: [gosec, goconst, staticcheck]
     paths:
       - internal/database/postgresql/gen
       - docs

@@ -19,12 +19,10 @@ make migrate-up | migrate-down | migrate-status
 # 코드 생성
 make sqlc             # migrations/ + */query.sql → internal/database/postgresql/gen
 make create-swagger   # docs/api
-make domain table=v1.orders name=order   # 테이블로 도메인 뼈대
 
 # 검사
 make test             # go test -race
 make lint             # ./bin/golangci-lint (없으면 make tools-upgrade)
-make check            # lint + test + sqlc diff (CI 와 같음)
 make build            # 운영 이미지 (Dockerfile.prod, distroless)
 ```
 
