@@ -24,6 +24,9 @@ make create-swagger   # docs/api
 make test             # go test -race
 make lint             # ./bin/golangci-lint (없으면 make tools-upgrade)
 make build            # 운영 이미지 (Dockerfile.prod, distroless)
+
+# 템플릿에서 새 프로젝트 시작
+make rename name=order-api   # go.mod·import·쿠키·compose·이미지 이름 변경 후 build + swagger 재생성
 ```
 
 ## Architecture

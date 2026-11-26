@@ -11,6 +11,9 @@ Go HTTP API 템플릿. Chi v5, PostgreSQL(pgx/v5 + sqlc + goose), JWT 쿠키 인
 ## Quick Start
 
 ```bash
+# 0. 프로젝트 이름 변경 (go.mod, import, 인증 쿠키, compose, 이미지 이름)
+make rename name=order-api
+
 # 1. 환경 파일
 cp .env.template .env.local
 # API_SECRET_KEY, CURSOR_SECRET 를 채운다 (비어 있으면 서버가 시작되지 않는다)
@@ -89,6 +92,7 @@ make sqlc | create-swagger
 make test | lint
 make build            # 운영 이미지 (distroless, nonroot)
 make tools-upgrade    # air, swag, sqlc, golangci-lint
+make rename name=...  # 프로젝트 이름 변경 (scripts/rename.sh)
 ```
 
 push 하면 CI(`.github/workflows/ci.yml`)가 검사한다: build, vet, test -race, sqlc diff, govulncheck, golangci-lint, 운영 이미지 빌드.
