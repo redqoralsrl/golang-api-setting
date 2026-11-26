@@ -1,378 +1,105 @@
 ---
 name: add-handler
-description: Add a new HTTP endpoint to an existing domain in this Go API project. Adds the UseCase method signature, service stub, request/response structs, handler method with Swagger comments, and route registration. Usage: /add-handler <domain> <HandlerName> <HTTP_METHOD> <route> [public|app|admin]. Example: /add-handler user GetUser GET /user/{id} app
+description: Add a new HTTP endpoint to an existing domain in this Go API project - SQL query (sqlc), repository method, UseCase method and service, handler with Swagger comments, and route registration. Usage: /add-handler <domain> <HandlerName> <HTTP_METHOD> <route> [public|app|upload]. Example: /add-handler order ListOrders GET /order app
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # Add Handler Skill
 
-Add a new HTTP endpoint to an **existing** domain in this Go API project.
+Add one endpoint to an **existing** domain, through every layer, so it builds and works.
 
-**Arguments**: `$ARGUMENTS`
+**Arguments**: `$ARGUMENTS` = `<domain> <HandlerName> <HTTP_METHOD> <route> [group]`
+- **domain**: existing domain, lowercase (`order`)
+- **HandlerName**: PascalCase (`ListOrders`, `UpdateOrder`, `DeleteOrder`)
+- **HTTP_METHOD**: `GET` `POST` `PUT` `PATCH` `DELETE` → chi method `Get` `Post` ...
+- **route**: path relative to the group, chi params in braces (`/order/{id}`)
+- **group**: `public` → `handler.Routes.Public` (`/api/v1`), `app` (default) → `handler.Routes.App` (`/api/v1/app`, user JWT), `upload` → `handler.Routes.AppUpload` (20MB body). Never `Admin` until admin auth exists.
 
-Parse `$ARGUMENTS` as 5 space-separated tokens:
-1. **domain** — existing domain name, lowercase (e.g. `user`)
-2. **HandlerName** — PascalCase name for the handler function (e.g. `GetUser`, `UpdateUser`, `DeleteUser`)
-3. **HTTP_METHOD** — one of: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`
-4. **route** — URL path, may include `{id}` params (e.g. `/user/{id}`, `/user/search`)
-5. **group** — route group: `public`, `app`, or `admin` (default: `public`)
-
-Derive from the parsed values:
-- **pascal** = HandlerName as-is (already PascalCase)
-- **method** = HTTP_METHOD lowercased for chi registration (e.g. `Get`, `Post`, `Put`, `Patch`, `Delete`)
-- **routeGroup** = `handler.Routes.Public` / `handler.Routes.App` / `handler.Routes.Admin` based on group
-
----
-
-## Step 0: Validate
-
-If `$ARGUMENTS` has fewer than 4 tokens, print:
+If fewer than 4 tokens, print the usage line with examples and stop:
 ```
-Usage: /add-handler <domain> <HandlerName> <HTTP_METHOD> <route> [public|app|admin]
-
-Examples:
-  /add-handler user GetUser GET /user/{id} app
-  /add-handler user UpdateUser PUT /user/{id} app
-  /add-handler user ListUsers GET /user/list public
-  /add-handler user DeleteUser DELETE /user/{id} app
+/add-handler order GetOrder GET /order/{id} app
+/add-handler order ListOrders GET /order app
+/add-handler order UpdateOrder PUT /order/{id} app
+/add-handler order DeleteOrder DELETE /order/{id} app
 ```
-Then stop.
 
----
+Read `CLAUDE.md` first and follow its rules.
 
-## Step 1: Verify the domain exists
+## Step 1: Read the domain
 
-Check that these files exist:
-- `domain/<domain>/<domain>.go`
+Stop with `Domain "<domain>" not found. Run /add-domain <domain> first.` if `domain/<domain>/<domain>.go` or `internal/http/chi/<domain>.go` is missing. Otherwise read, before editing:
+- `domain/<domain>/<domain>.go`, `error.go`, `service.go`
+- `domain/<domain>/postgresql/query.sql`, `storage.go`
 - `internal/http/chi/<domain>.go`
+- the migration that creates the table (grep `migrations/` for `create table v1.<domain>s`, plus later `alter table` files) to know the real columns
 
-If either is missing, tell the user:
-```
-Domain "<domain>" not found. Run /add-domain <domain> first.
-```
-Then stop.
+## Step 2: Query (skip if the handler needs no new SQL)
 
----
+Append to `domain/<domain>/postgresql/query.sql`, then `go tool sqlc generate` and read the generated signature in `internal/database/postgresql/gen/query.sql.go`.
 
-## Step 2: Read existing files
+Patterns:
 
-Read all three files before making any edits:
-- `domain/<domain>/<domain>.go`
-- `domain/<domain>/service.go`
-- `internal/http/chi/<domain>.go`
+```sql
+-- name: List<Pascal>s :many
+-- 커서 페이지네이션: id 내림차순, cursor 보다 작은 id 부터 limit 개
+select * from v1.<domain>s
+where (sqlc.narg(cursor)::bigint is null or id < sqlc.narg(cursor)::bigint)
+order by id desc
+limit sqlc.arg(page_size);
 
----
+-- name: Update<Pascal> :one
+update v1.<domain>s
+set name = sqlc.arg(name)
+where id = sqlc.arg(id)
+returning *;
 
-## Step 3: Add UseCase method to `domain/<domain>/<domain>.go`
-
-Find the `UseCase interface` block and add the new method signature.
-
-For **GET** handlers (typically return a single entity or list):
-```go
-<HandlerName>(ctx context.Context, id int) (*<Pascal_entity>, error)
-```
-
-For **POST** handlers:
-```go
-<HandlerName>(ctx context.Context) (*<Pascal_entity>, error)
+-- name: Delete<Pascal> :execrows
+delete from v1.<domain>s where id = sqlc.arg(id);
 ```
 
-For **PUT/PATCH** handlers:
-```go
-<HandlerName>(ctx context.Context, id int) (*<Pascal_entity>, error)
-```
+`:execrows` returns the affected row count; treat 0 as not found. Rows owned by a user should filter by `user_id = sqlc.arg(user_id)` in the query, not only in Go.
 
-For **DELETE** handlers:
-```go
-<HandlerName>(ctx context.Context, id int) error
-```
+## Step 3: Repository + domain interface
 
-Use the existing model type in the file (the struct defined in the same package). If the domain entity has fields like `ID int`, the return type is `*<DomainPascal>` (e.g. `*User`, `*Product`).
+1. Add the method to `Reader` (reads) or `Writer` (writes) in `domain/<domain>/<domain>.go`. Put multi-field inputs in a struct (`UpdateInput`), and paginated results in a struct:
+   ```go
+   type ListResult struct {
+       Items      []*<Pascal> `json:"items"`
+       NextCursor string      `json:"next_cursor,omitempty"`
+   }
+   ```
+2. Implement it in `storage.go`: call `s.db.Queries(ctx).<Query>(ctx, gen.<Query>Params{...})`, wrap errors with the existing `mapError`, convert rows with the existing `to<Pascal>`.
+   For a cursor list: decrypt the incoming cursor with `s.db.DecryptCursor`, fetch `limit+1` rows, and if there is an extra row encrypt the last returned id with `s.db.EncryptCursor` as `NextCursor`. An invalid cursor is a client error: add `ErrInvalidCursor` to `error.go` and return it.
 
-**Important**: infer the right signature by reading what methods already exist in the UseCase interface and what the domain struct looks like. Match the style of existing methods.
+## Step 4: UseCase + service
 
----
+Add the method to `UseCase` and implement it in `service.go`. Keep HTTP types out of the domain. Use `s.txManager.WithTransaction(ctx, func(ctx context.Context) error {...})` only when the operation writes more than once. New failure cases get a new `Err...` in `error.go` (its text is shown to clients in 4xx responses).
 
-## Step 4: Add service stub to `domain/<domain>/service.go`
+## Step 5: Handler
 
-Add a new method on `*Service` that satisfies the UseCase interface method just added.
+In `internal/http/chi/<domain>.go`:
 
-For GET/PUT/PATCH (returns entity):
-```go
-func (s *Service) <HandlerName>(ctx context.Context, id int) (*<DomainPascal>, error) {
-	// TODO: implement
-	return nil, nil
-}
-```
+1. Register the route inside `<Pascal>Handler(...)`: `handler.Routes.<Group>.<Method>("<route>", h.<HandlerName>)`.
+2. Request struct with `json` + `validate` tags (skip for GET/DELETE). Query params for lists: read `r.URL.Query()`, clamp `limit` to 1..100 (default 20).
+3. Handler method:
+   - JSON body: `if !bindJSON(w, r, h.validator, &req) { return }`
+   - Path id: `strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)`, reject `<= 0` with 400
+   - Current user (app group): `id, ok := auth.FromContext(r.Context())`, parse `id.UserID`
+   - Errors: reuse/extend the domain's `writeError` switch. Unknown errors go to `response.WriteErrorWithRequest(..., 500, ...)`
+   - Success: `response.WriteResponse(w, <status>, response.Success, nil, data)`. 201 for create, 200 otherwise (DELETE may return 200 with `nil` data)
+4. Swagger comment block above the method: `@Summary`, `@Tags <Pascal>s`, `@Accept json` (if body), `@Produce json`, `@Param` for body/path/query, `@Success <code> {object} response.Response{data=<type>}`, each `@Failure`, `@Router <path relative to /api/v1> [<method>]` — app group paths start with `/app/`.
 
-For POST (returns entity, no id param):
-```go
-func (s *Service) <HandlerName>(ctx context.Context) (*<DomainPascal>, error) {
-	// TODO: implement
-	return nil, nil
-}
-```
-
-For DELETE (returns error):
-```go
-func (s *Service) <HandlerName>(ctx context.Context, id int) error {
-	// TODO: implement
-	return nil
-}
-```
-
-Match the exact signature added to the UseCase interface in Step 3.
-
----
-
-## Step 5: Add handler to `internal/http/chi/<domain>.go`
-
-### 5a: Add request struct (skip for GET/DELETE)
-
-For POST/PUT/PATCH, add a request struct before the new handler function:
-
-```go
-type <HandlerName>Request struct {
-	// TODO: add request fields
-}
-```
-
-### 5b: Add the handler method
-
-Append to the file a new method on the handler struct. Use the existing handler struct name in the file (e.g. `userHandler`, `productHandler`).
-
-**GET with `{id}` in route**:
-```go
-// <HandlerName> godoc
-// @Summary <HandlerName>
-// @Description <HandlerName> for <domain>.
-// @Tags <DomainPascal>s
-// @Produce json
-// @Param id path int true "<DomainPascal> ID"
-// @Success 200 {object} response.Response{data=<domain>.<DomainPascal>}
-// @Failure 404 {object} response.Response "<domain> not found"
-// @Failure 500 {object} response.Response "internal server error"
-// @Router <route> [get]
-func (h *<domain>Handler) <HandlerName>(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, err)
-		return
-	}
-
-	data, err := h.useCase.<HandlerName>(ctx, id)
-	if err != nil {
-		switch {
-		case errors.Is(err, <domain>.ErrNotFound):
-			response.WriteError(w, http.StatusNotFound, response.NotFound, err)
-		default:
-			response.WriteErrorWithRequest(w, r, nil, http.StatusInternalServerError, response.InternalError, err)
-		}
-		return
-	}
-
-	response.WriteResponse(w, http.StatusOK, response.Success, nil, data)
-}
-```
-
-**GET without `{id}`** (list):
-```go
-// <HandlerName> godoc
-// @Summary <HandlerName>
-// @Description <HandlerName> for <domain>.
-// @Tags <DomainPascal>s
-// @Produce json
-// @Success 200 {object} response.Response{data=[]<domain>.<DomainPascal>}
-// @Failure 500 {object} response.Response "internal server error"
-// @Router <route> [get]
-func (h *<domain>Handler) <HandlerName>(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	data, err := h.useCase.<HandlerName>(ctx)
-	if err != nil {
-		response.WriteErrorWithRequest(w, r, nil, http.StatusInternalServerError, response.InternalError, err)
-		return
-	}
-
-	response.WriteResponse(w, http.StatusOK, response.Success, nil, data)
-}
-```
-
-**POST**:
-```go
-// <HandlerName> godoc
-// @Summary <HandlerName>
-// @Description <HandlerName> for <domain>.
-// @Tags <DomainPascal>s
-// @Accept json
-// @Produce json
-// @Param request body <HandlerName>Request true "<HandlerName> request"
-// @Success 201 {object} response.Response{data=<domain>.<DomainPascal>}
-// @Failure 400 {object} response.Response "invalid input"
-// @Failure 500 {object} response.Response "internal server error"
-// @Router <route> [post]
-func (h *<domain>Handler) <HandlerName>(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	var req <HandlerName>Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, err)
-		return
-	}
-
-	if validationErrs := h.validator.Validate(req); validationErrs != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, errors.New("validation failed"))
-		return
-	}
-
-	data, err := h.useCase.<HandlerName>(ctx)
-	if err != nil {
-		response.WriteErrorWithRequest(w, r, nil, http.StatusInternalServerError, response.InternalError, err)
-		return
-	}
-
-	response.WriteResponse(w, http.StatusCreated, response.Success, nil, data)
-}
-```
-
-**PUT/PATCH**:
-```go
-// <HandlerName> godoc
-// @Summary <HandlerName>
-// @Description <HandlerName> for <domain>.
-// @Tags <DomainPascal>s
-// @Accept json
-// @Produce json
-// @Param id path int true "<DomainPascal> ID"
-// @Param request body <HandlerName>Request true "<HandlerName> request"
-// @Success 200 {object} response.Response{data=<domain>.<DomainPascal>}
-// @Failure 400 {object} response.Response "invalid input"
-// @Failure 404 {object} response.Response "<domain> not found"
-// @Failure 500 {object} response.Response "internal server error"
-// @Router <route> [put]
-func (h *<domain>Handler) <HandlerName>(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, err)
-		return
-	}
-
-	var req <HandlerName>Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, err)
-		return
-	}
-
-	if validationErrs := h.validator.Validate(req); validationErrs != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, errors.New("validation failed"))
-		return
-	}
-
-	data, err := h.useCase.<HandlerName>(ctx, id)
-	if err != nil {
-		switch {
-		case errors.Is(err, <domain>.ErrNotFound):
-			response.WriteError(w, http.StatusNotFound, response.NotFound, err)
-		default:
-			response.WriteErrorWithRequest(w, r, nil, http.StatusInternalServerError, response.InternalError, err)
-		}
-		return
-	}
-
-	response.WriteResponse(w, http.StatusOK, response.Success, nil, data)
-}
-```
-
-**DELETE**:
-```go
-// <HandlerName> godoc
-// @Summary <HandlerName>
-// @Description <HandlerName> for <domain>.
-// @Tags <DomainPascal>s
-// @Produce json
-// @Param id path int true "<DomainPascal> ID"
-// @Success 200 {object} response.Response
-// @Failure 404 {object} response.Response "<domain> not found"
-// @Failure 500 {object} response.Response "internal server error"
-// @Router <route> [delete]
-func (h *<domain>Handler) <HandlerName>(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, response.InvalidInput, err)
-		return
-	}
-
-	if err := h.useCase.<HandlerName>(ctx, id); err != nil {
-		switch {
-		case errors.Is(err, <domain>.ErrNotFound):
-			response.WriteError(w, http.StatusNotFound, response.NotFound, err)
-		default:
-			response.WriteErrorWithRequest(w, r, nil, http.StatusInternalServerError, response.InternalError, err)
-		}
-		return
-	}
-
-	response.WriteResponse(w, http.StatusOK, response.Success, nil, nil)
-}
-```
-
-### 5c: Add missing imports if needed
-
-If the handler file doesn't already import them, add:
-- `"strconv"` — when route contains `{id}` (GET/PUT/PATCH/DELETE with id)
-- `"github.com/go-chi/chi/v5"` — when using `chi.URLParam`
-
-Check existing imports before adding to avoid duplicates.
-
----
-
-## Step 6: Register the route
-
-Find the `<DomainPascal>Handler` function in `internal/http/chi/<domain>.go`. Add the new route inside it, after the last existing route registration:
-
-```go
-handler.Routes.<Group>.<Method>("<route>", h.<HandlerName>)
-```
-
-Where:
-- `<Group>` = `Public`, `App`, or `Admin` (capitalized)
-- `<Method>` = `Get`, `Post`, `Put`, `Patch`, or `Delete` (capitalized)
-- `<route>` = the route path from the argument
-
----
-
-## Step 7: Verify
+## Step 6: Verify
 
 ```bash
-cd /Users/minki/Desktop/golang-api-setting && go build ./... 2>&1
+gofmt -w domain/<domain> internal/http/chi
+go build ./... && go vet ./... && go test ./...
+go tool sqlc diff
+go tool swag init -g ./internal/http/chi/api_handler.go -o ./docs/api --parseDependency --parseInternal --instanceName api
 ```
 
-If the build fails, read the errors and fix them before reporting.
+Fix all errors. When the change has branching logic (pagination, ownership checks), add a table test next to the existing ones (`internal/http/chi/router_test.go` shows the fake-UseCase pattern).
 
----
+## Step 7: Report
 
-## Step 8: Report
-
-```
-✓ Modified domain/<domain>/<domain>.go  (added <HandlerName> to UseCase interface)
-✓ Modified domain/<domain>/service.go   (added <HandlerName> stub)
-✓ Modified internal/http/chi/<domain>.go (added handler + route registration)
-
-Endpoint: <HTTP_METHOD> /api/v1[/app|/admin]<route>
-
-Next steps:
-1. domain/<domain>/service.go — implement <HandlerName> logic
-2. domain/<domain>/<domain>.go — add Repository method if DB access needed
-3. domain/<domain>/postgresql/storage.go — implement the repository method
-4. domain/<domain>/postgresql/query.sql — write SQL, then: make sqlc
-5. make create-swagger  (after Swagger comments are final)
-```
+Print the endpoint (`<METHOD> /api/v1/...`), the files changed, and anything left for the user (business rules, extra validation).
