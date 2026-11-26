@@ -2,25 +2,29 @@ package jwt
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type TokenConfig struct {
-	SecretKey string
-}
+const minSecretKeyLen = 32
 
 type JWTAdapter struct {
-	config TokenConfig
+	secretKey []byte
+	parser    *jwt.Parser
 }
 
-func NewJWTAdapter(secretKey string) *JWTAdapter {
-	return &JWTAdapter{
-		config: TokenConfig{
-			SecretKey: secretKey,
-		},
+func NewJWTAdapter(secretKey string) (*JWTAdapter, error) {
+	if len(secretKey) < minSecretKeyLen {
+		return nil, fmt.Errorf("jwt secret key must be at least %d characters", minSecretKeyLen)
 	}
+
+	return &JWTAdapter{
+		secretKey: []byte(secretKey),
+		// HS256 외 알고리즘(none 포함)과 exp 없는 토큰은 거부한다
+		parser: jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired()),
+	}, nil
 }
 
 type Claims struct {
@@ -30,34 +34,30 @@ type Claims struct {
 }
 
 func (a *JWTAdapter) GenerateToken(userID, role string, expired time.Duration) (string, error) {
+	now := time.Now()
 	claims := &Claims{
 		UserID: userID,
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expired)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(now.Add(expired)),
+			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(a.config.SecretKey))
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(a.secretKey)
 }
 
 func (a *JWTAdapter) ValidateToken(tokenString string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(a.config.SecretKey), nil
+	claims := &Claims{}
+	token, err := a.parser.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) {
+		return a.secretKey, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
-
-	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		return claims, nil
+	if !token.Valid {
+		return nil, errors.New("invalid token")
 	}
 
-	return nil, errors.New("invalid token")
+	return claims, nil
 }

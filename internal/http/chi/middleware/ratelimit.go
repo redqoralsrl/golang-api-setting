@@ -1,84 +1,72 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 	"time"
 
+	response "go-template/internal/http"
+
 	"golang.org/x/time/rate"
 )
 
-// RateLimiter IP별 rate limiter 관리
-type RateLimiter struct {
-	limiters map[string]*rate.Limiter
-	mu       sync.RWMutex
+const visitorTTL = 3 * time.Minute
+
+type visitor struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+// rateLimiter IP별 토큰 버킷. 서버 한 대 메모리 기준이라 여러 대면 대당 한도다.
+type rateLimiter struct {
+	mu       sync.Mutex
+	visitors map[string]*visitor
 	rate     rate.Limit
 	burst    int
 }
 
-// NewRateLimiter 새로운 rate limiter 생성
-func NewRateLimiter(rps rate.Limit, burst int) *RateLimiter {
-	return &RateLimiter{
-		limiters: make(map[string]*rate.Limiter),
-		rate:     rps,
-		burst:    burst,
-	}
-}
-
-// GetLimiter IP별 limiter 조회/생성
-func (rl *RateLimiter) GetLimiter(ip string) *rate.Limiter {
+func (rl *rateLimiter) allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	limiter, exists := rl.limiters[ip]
-	if !exists {
-		limiter = rate.NewLimiter(rl.rate, rl.burst)
-		rl.limiters[ip] = limiter
+	v, ok := rl.visitors[ip]
+	if !ok {
+		v = &visitor{limiter: rate.NewLimiter(rl.rate, rl.burst)}
+		rl.visitors[ip] = v
 	}
-
-	return limiter
+	v.lastSeen = time.Now()
+	return v.limiter.Allow()
 }
 
-// RateLimitMiddleware Rate limiting 미들웨어
-func RateLimitMiddleware(rps rate.Limit, burst int) func(http.Handler) http.Handler {
-	rl := NewRateLimiter(rps, burst)
-
-	// 주기적으로 사용하지 않는 limiter 정리
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			rl.mu.Lock()
-			for ip, limiter := range rl.limiters {
-				// 최근 1분간 토큰이 가득 찬 limiter는 삭제
-				if limiter.Tokens() == float64(burst) {
-					delete(rl.limiters, ip)
-				}
+func (rl *rateLimiter) cleanup() {
+	for range time.Tick(time.Minute) {
+		rl.mu.Lock()
+		for ip, v := range rl.visitors {
+			if time.Since(v.lastSeen) > visitorTTL {
+				delete(rl.visitors, ip)
 			}
-			rl.mu.Unlock()
 		}
-	}()
+		rl.mu.Unlock()
+	}
+}
+
+// RateLimitMiddleware IP별 초당 rps 요청, 순간 burst 까지 허용한다.
+func RateLimitMiddleware(rps rate.Limit, burst int) func(http.Handler) http.Handler {
+	rl := &rateLimiter{visitors: make(map[string]*visitor), rate: rps, burst: burst}
+	go rl.cleanup()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 메트릭, 헬스체크는 rate limit 제외
-			if r.URL.Path == "/metrics" || r.URL.Path == "/health" {
+			if isProbePath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
-
-			ip := ClientIP(r)
-			if ip == "" {
-				ip = r.RemoteAddr
-			}
-
-			limiter := rl.GetLimiter(ip)
-			if !limiter.Allow() {
-				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			if !rl.allow(ClientIP(r)) {
+				w.Header().Set("Retry-After", "1")
+				response.WriteError(w, http.StatusTooManyRequests, response.TooManyReq, errors.New("rate limit exceeded"))
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}

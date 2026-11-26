@@ -16,11 +16,9 @@ type Caller interface {
 	TotalSupply(ctx context.Context) (*big.Int, error)
 }
 
-type Transact interface {
-}
+type Transact any
 
-type Event interface {
-}
+type Event any
 
 type Rpc interface {
 	Caller

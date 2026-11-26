@@ -1,2 +1,12 @@
-/data/
-/tmp/
+# 빌드 컨텍스트에 시크릿·불필요 파일이 들어가지 않게 한다
+.git
+.github
+.claude
+.env*
+!.env.template
+data
+tmp
+bin
+cmd/api/tmp
+coverage.*
+*.md

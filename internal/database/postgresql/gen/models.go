@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
+// API 에러 로그 (4xx 일부, 5xx)
 type V1ErrorLog struct {
-	ID           int32     `json:"id"`
-	Timestamp    time.Time `json:"timestamp"`
+	ID           int64     `json:"id"`
+	OccurredAt   time.Time `json:"occurred_at"`
 	IpAddress    string    `json:"ip_address"`
 	UserAgent    string    `json:"user_agent"`
 	Path         string    `json:"path"`
@@ -23,23 +24,23 @@ type V1ErrorLog struct {
 // 유저 테이블
 type V1User struct {
 	// 유저 고유 id
-	ID int32 `json:"id"`
+	ID int64 `json:"id"`
 	// 생성 날짜
 	CreatedAt time.Time `json:"created_at"`
 	// 업데이트 날짜
 	UpdatedAt time.Time `json:"updated_at"`
-	// 유저 이메일
+	// 유저 이메일 (소문자)
 	Email string `json:"email"`
-	// 유저 비밀번호
+	// 유저 비밀번호 bcrypt 해시
 	PasswordHash string `json:"password_hash"`
 }
 
 // 유저 로그인 로그 테이블
 type V1UserLoginLog struct {
 	// 로그인 로그 고유 id
-	ID int32 `json:"id"`
-	// 로그인 시도 날짜
+	ID int64 `json:"id"`
+	// 로그인 날짜
 	CreatedAt time.Time `json:"created_at"`
-	// 로그인 시도 유저 id
-	UserID int32 `json:"user_id"`
+	// 로그인 유저 id
+	UserID int64 `json:"user_id"`
 }

@@ -2,127 +2,113 @@ package postgresql
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"net"
+	"net/url"
+	"time"
+
 	"go-template/config"
 	"go-template/internal/database/postgresql/gen"
 	"go-template/internal/logger"
-	"go-template/internal/metrics"
-	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
-	InitialBackoff = 500 * time.Millisecond
-	MaxBackoff     = 60 * time.Second
-	BackoffFactor  = 2
-	MaxRetries     = 10
-	MaxIdleConn    = 15
-	MaxOpenConn    = 30
+	initialBackoff = 500 * time.Millisecond
+	maxBackoff     = 60 * time.Second
+	maxRetries     = 10
+
+	maxConns        = 30
+	minIdleConns    = 2
+	maxConnIdleTime = 5 * time.Minute
+	maxConnLifetime = time.Hour
 )
 
+// sessionParams 앱 연결마다 거는 세션 설정. 마이그레이션 연결에는 걸지 않는다(오래 걸리는 DDL 이 끊기지 않게).
+var sessionParams = map[string]string{
+	"timezone":                            "UTC",
+	"statement_timeout":                   "10s",
+	"lock_timeout":                        "5s",
+	"idle_in_transaction_session_timeout": "30s",
+}
+
 type Database struct {
-	Querier
-	Queries *gen.Queries //sqlc로 생성된 쿼리
+	pool    *pgxpool.Pool
+	queries *gen.Queries
 	cursor  *Cursor
-	done    chan struct{}
 }
 
-type Querier interface {
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
-}
-
-func NewDB(config *config.Config, l logger.Logger) (*Database, error) {
-	user := config.DBUser
-	password := config.DBPassword
-	dbname := config.DBName
-	host := config.DBHost
-	port := config.DBPort
-
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable timezone=UTC", host, port, user, password, dbname)
-	if config.Stage != "dev" {
-		dsn = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=require timezone=UTC", host, port, user, password, dbname)
+// NewDB 연결 풀을 만들고 Ping 이 될 때까지 지수 백오프(0.5s → 60s, 최대 10회)로 재시도한다.
+func NewDB(ctx context.Context, conf *config.Config, l logger.Logger) (*Database, error) {
+	cursor, err := NewCursor([]byte(conf.CursorSecret))
+	if err != nil {
+		return nil, err
 	}
 
-	var db *sql.DB
-	var err error
+	poolConf, err := pgxpool.ParseConfig(DSN(conf.DB))
+	if err != nil {
+		return nil, fmt.Errorf("parse database config: %w", err)
+	}
+	for k, v := range sessionParams {
+		poolConf.ConnConfig.RuntimeParams[k] = v
+	}
+	poolConf.MaxConns = maxConns
+	poolConf.MinIdleConns = minIdleConns
+	poolConf.MaxConnIdleTime = maxConnIdleTime
+	poolConf.MaxConnLifetime = maxConnLifetime
 
-	backoff := InitialBackoff
-	for i := 0; i < MaxRetries; i++ {
-		db, err = sql.Open("postgres", dsn)
-		db.SetMaxIdleConns(MaxIdleConn)
-		db.SetMaxOpenConns(MaxOpenConn)
-		if err == nil {
-			err = db.Ping()
-			cursorSecret := []byte(config.CursorSecret)
-			cursorInstance := NewCursor(cursorSecret)
-
-			if err == nil {
-				database := &Database{
-					Querier: db,
-					Queries: gen.New(db),
-					cursor:  cursorInstance,
-					done:    make(chan struct{}),
-				}
-				database.recordStats()
-				go database.observeStats(10 * time.Second)
-
-				return database, nil
-			}
-		}
-		l.Warn("Failed to connect to the database. Retrying...", logger.NewField("error", err), logger.NewField("backoff", backoff))
-
-		time.Sleep(backoff)
-		backoff = time.Duration(float64(backoff) * BackoffFactor)
-		if backoff > MaxBackoff {
-			backoff = MaxBackoff
-		}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConf)
+	if err != nil {
+		return nil, fmt.Errorf("create database pool: %w", err)
 	}
 
-	l.Error("Failed to connect to the database after multiple retries", logger.NewField("error", err))
-	return nil, fmt.Errorf("failed to connect to the database after %d retries: %v", MaxRetries, err)
-}
-
-func (d *Database) Close() error {
-	close(d.done)
-	return d.Querier.(*sql.DB).Close()
-}
-
-func (d *Database) observeStats(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
+	backoff := initialBackoff
+	for attempt := 1; ; attempt++ {
+		if err = pool.Ping(ctx); err == nil {
+			return &Database{pool: pool, queries: gen.New(pool), cursor: cursor}, nil
+		}
+		if attempt == maxRetries {
+			break
+		}
+		l.Warn("Failed to connect to the database. Retrying...", logger.NewError(err), logger.NewField("backoff", backoff.String()))
 		select {
-		case <-ticker.C:
-			d.recordStats()
-		case <-d.done:
-			return
+		case <-ctx.Done():
+			pool.Close()
+			return nil, ctx.Err()
+		case <-time.After(backoff):
 		}
+		backoff = min(backoff*2, maxBackoff)
 	}
+
+	pool.Close()
+	return nil, fmt.Errorf("connect to database after %d attempts: %w", maxRetries, err)
 }
 
-func (d *Database) recordStats() {
-	metrics.RecordDatabaseStats(d.Querier.(*sql.DB).Stats())
-}
-
-func (d *Database) GetQueryRowerFromContext(ctx context.Context) *Database {
-	if tx, ok := TransactionFromContext(ctx); ok {
-		return tx
+// DSN postgres URL. 비밀번호에 특수문자가 있어도 안전하게 인코딩한다.
+func DSN(d config.Database) string {
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(d.User, d.Password),
+		Host:     net.JoinHostPort(d.Host, d.Port),
+		Path:     d.Name,
+		RawQuery: url.Values{"sslmode": {d.SSLMode}}.Encode(),
 	}
-	return d
+	return u.String()
 }
 
-func (d *Database) EncryptCursor(id int) (string, error) {
-	return d.cursor.Encrypt(id)
+func (d *Database) Close() { d.pool.Close() }
+
+func (d *Database) Ping(ctx context.Context) error { return d.pool.Ping(ctx) }
+
+// Queries sqlc 쿼리. ctx 에 트랜잭션이 있으면(TxManager.WithTransaction 안) 그 트랜잭션으로 실행한다.
+func (d *Database) Queries(ctx context.Context) *gen.Queries {
+	if tx, ok := txFromContext(ctx); ok {
+		return d.queries.WithTx(tx)
+	}
+	return d.queries
 }
 
-func (d *Database) DecryptCursor(encodedCursor string) (int, error) {
-	return d.cursor.Decrypt(encodedCursor)
-}
+func (d *Database) EncryptCursor(id int64) (string, error) { return d.cursor.Encrypt(id) }
+
+func (d *Database) DecryptCursor(encoded string) (int64, error) { return d.cursor.Decrypt(encoded) }

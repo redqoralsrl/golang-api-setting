@@ -1,6 +1,6 @@
--- name: CreateErrorLog :one
+-- name: CreateErrorLog :exec
 insert into v1.error_log (
-    timestamp,
+    occurred_at,
     ip_address,
     user_agent,
     path,
@@ -9,22 +9,12 @@ insert into v1.error_log (
     error_code,
     error_message
 ) values (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7,
-    $8
-)
-returning
-    id,
-    timestamp,
-    ip_address,
-    user_agent,
-    path,
-    http_method,
-    requested_url,
-    error_code,
-    error_message;
+    sqlc.arg(occurred_at),
+    sqlc.arg(ip_address),
+    sqlc.arg(user_agent),
+    sqlc.arg(path),
+    sqlc.arg(http_method),
+    sqlc.arg(requested_url),
+    sqlc.arg(error_code),
+    sqlc.arg(error_message)
+);

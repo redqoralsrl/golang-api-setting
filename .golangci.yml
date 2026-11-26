@@ -10,6 +10,29 @@ linters:
     - govet
     - staticcheck
     - unused
+    - bodyclose
+    - gosec
+    - misspell
+  settings:
+    goconst:
+      # 로그 키·JSON 키처럼 글자만 우연히 같은 값은 상수로 묶지 않는다
+      ignore-string-values:
+        - ^error$
+        - ^name$
+        - ^role$
+    gosec:
+      excludes:
+        - G115 # int 변환 overflow: DB id·status 코드 변환이 많아 오탐이 잦다
+  exclusions:
+    generated: strict
+    rules:
+      # 테스트는 반복 문자열이 읽기 쉽다
+      - path: _test\.go
+        linters: [goconst]
+    paths:
+      - internal/database/postgresql/gen
+      - docs
+      - internal/blockchain/erc20/solidity
 
 issues:
   max-issues-per-linter: 0

@@ -9,9 +9,15 @@ import (
 )
 
 type Querier interface {
-	CreateErrorLog(ctx context.Context, arg CreateErrorLogParams) (V1ErrorLog, error)
+	AdvisoryUnlock(ctx context.Context, arg AdvisoryUnlockParams) (bool, error)
+	CreateErrorLog(ctx context.Context, arg CreateErrorLogParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) (V1User, error)
 	CreateUserLoginLog(ctx context.Context, arg CreateUserLoginLogParams) error
+	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (V1User, error)
+	GetUserByID(ctx context.Context, arg GetUserByIDParams) (V1User, error)
+	TryAdvisoryLock(ctx context.Context, arg TryAdvisoryLockParams) (bool, error)
+	// 공용 쿼리 (advisory lock). 도메인 쿼리는 domain/<name>/postgresql/query.sql 에 둔다.
+	TryAdvisoryXactLock(ctx context.Context, arg TryAdvisoryXactLockParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

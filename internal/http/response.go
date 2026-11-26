@@ -2,8 +2,10 @@ package http
 
 import (
 	"encoding/json"
-	"go-template/internal/logger"
 	"net/http"
+
+	"go-template/internal/logger"
+	"go-template/internal/validator"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -20,35 +22,35 @@ const (
 	UnAuthorized       Message = "unauthorized"
 	InvalidInput       Message = "invalid input"
 	Forbidden          Message = "forbidden"
+	PayloadTooLarge    Message = "payload too large"
 	ServiceUnavailable Message = "service unavailable"
-	DatabaseError      Message = "Database Error"
-	InternalError      Message = "Internal Server Error"
+	DatabaseError      Message = "database error"
+	InternalError      Message = "internal server error"
 )
 
+// Response 모든 JSON 응답의 공통 형태
 type Response struct {
-	Code    int         `json:"code"`
-	Message Message     `json:"message"`
-	Error   *string     `json:"error,omitempty"`
-	Data    interface{} `json:"data"`
+	Code    int                       `json:"code"`
+	Message Message                   `json:"message"`
+	Error   *string                   `json:"error,omitempty"`
+	Errors  []validator.ErrorResponse `json:"errors,omitempty"` // 입력 검증 실패 시 필드별 사유
+	Data    any                       `json:"data"`
 }
 
-func WriteResponse(w http.ResponseWriter, code int, message Message, err *string, data interface{}) {
+func write(w http.ResponseWriter, res Response) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(code)
-	if encodeErr := json.NewEncoder(w).Encode(Response{
-		Code:    code,
-		Message: message,
-		Error:   err,
-		Data:    data,
-	}); encodeErr != nil {
-		// JSON encoding 실패 시 최소한의 응답
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	w.WriteHeader(res.Code)
+	_ = json.NewEncoder(w).Encode(res)
 }
 
+func WriteResponse(w http.ResponseWriter, code int, message Message, err *string, data any) {
+	write(w, Response{Code: code, Message: message, Error: err, Data: data})
+}
+
+// WriteError 5xx 는 내부 에러 내용을 숨기고 고정 문구만 보낸다.
 func WriteError(w http.ResponseWriter, code int, message Message, err error) {
 	str := ""
-	if code >= 500 {
+	if code >= http.StatusInternalServerError {
 		str = "Internal Server Error"
 	} else if err != nil {
 		str = err.Error()
@@ -56,56 +58,27 @@ func WriteError(w http.ResponseWriter, code int, message Message, err error) {
 	WriteResponse(w, code, message, &str, nil)
 }
 
-func WriteErrorWithRequest(w http.ResponseWriter, r *http.Request, l logger.Logger, code int, message Message, err error) {
-	logErrorWithRequest(r, l, code, message, err)
-	WriteError(w, code, message, err)
+func WriteValidationError(w http.ResponseWriter, errs []validator.ErrorResponse) {
+	msg := "validation failed"
+	write(w, Response{Code: http.StatusBadRequest, Message: InvalidInput, Error: &msg, Errors: errs})
 }
 
-// func LogErrorWithRequest(r *http.Request, l logger.Logger, code int, message Message, err error) {
-// 	logErrorWithRequest(r, l, code, message, err)
-// }
-
-func logErrorWithRequest(r *http.Request, l logger.Logger, code int, message Message, err error) {
-	if code >= 500 && l != nil {
-		fields := []logger.Field{
+// WriteErrorWithRequest 5xx 면 요청 정보와 원인 에러를 로그로 남긴 뒤 응답한다.
+func WriteErrorWithRequest(w http.ResponseWriter, r *http.Request, l logger.Logger, code int, message Message, err error) {
+	if code >= http.StatusInternalServerError && l != nil && r != nil {
+		pattern := r.URL.Path
+		if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
+			pattern = rc.RoutePattern()
+		}
+		l.Error("http error response",
 			logger.NewField("status", code),
 			logger.NewField("response_message", message),
-		}
-		if err != nil {
-			fields = append(fields, logger.NewError(err))
-		}
-		if r != nil {
-			routePattern := r.URL.Path
-			if routeContext := chi.RouteContext(r.Context()); routeContext != nil {
-				if pattern := routeContext.RoutePattern(); pattern != "" {
-					routePattern = pattern
-				}
-			}
-
-			fields = append(fields,
-				logger.NewField("method", r.Method),
-				logger.NewField("path", r.URL.Path),
-				logger.NewField("route_pattern", routePattern),
-				logger.NewField("remote_addr", r.RemoteAddr),
-				logger.NewField("user_agent", r.UserAgent()),
-			)
-			if query := r.URL.RawQuery; query != "" {
-				fields = append(fields, logger.NewField("query", query))
-			}
-			if requestID := chiMiddleware.GetReqID(r.Context()); requestID != "" {
-				fields = append(fields, logger.NewField("request_id", requestID))
-			}
-		}
-
-		l.Error("http error response", fields...)
+			logger.NewError(err),
+			logger.NewField("method", r.Method),
+			logger.NewField("path", r.URL.Path),
+			logger.NewField("route_pattern", pattern),
+			logger.NewField("request_id", chiMiddleware.GetReqID(r.Context())),
+		)
 	}
-}
-
-func IsValidMessage(msg string) bool {
-	switch Message(msg) {
-	case Success, Fail, NotFound, Conflict, TooManyReq, Forbidden, ServiceUnavailable, UnAuthorized, InvalidInput, DatabaseError, InternalError:
-		return true
-	default:
-		return false
-	}
+	WriteError(w, code, message, err)
 }

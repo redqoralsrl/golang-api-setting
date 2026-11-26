@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"go-template/internal/logger"
@@ -13,140 +12,53 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func config(stage string) zerolog.Logger {
-	var logger zerolog.Logger
-
-	// 시간 포맷터 설정
-	zerolog.TimeFieldFormat = time.RFC3339
-
-	if stage == "dev" {
-		// 개발 환경 설정
-		output := zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: time.RFC3339,
-			NoColor:    false, // 컬러 출력 활성화
-		}
-
-		logger = zerolog.New(output).
-			Level(zerolog.DebugLevel). // 디버그 레벨 설정
-			With().
-			Timestamp(). // 타임스탬프 추가
-			Logger()
-
-	} else {
-		// 운영 환경 설정
-		logger = zerolog.New(os.Stdout).
-			Level(zerolog.InfoLevel). // 인포 레벨 설정
-			With().
-			Timestamp(). // 타임스탬프 추가
-			Logger()
-	}
-	logger.Warn().Msg("Logger initialized")
-	logger.Error().Fields(map[string]interface{}{"key": "value"}).Msg("Logger initialized")
-	logger.Debug().Fields(map[string]interface{}{"key": "value"}).Msg("Logger initialized")
-
-	return logger
-}
-
-func NewLogger(stage string) logger.Logger {
-	logger := config(stage)
-	return &ZeroLogger{log: logger}
-}
-
-// ZeroLogger Zerolog 구현체
+// ZeroLogger Zerolog 구현체. dev 는 컬러 콘솔(Debug), 그 외는 JSON(Info)으로 출력한다.
 type ZeroLogger struct {
 	log zerolog.Logger
 }
 
-func (z *ZeroLogger) Debug(msg string, fields ...logger.Field) {
-	_, file, line, ok := runtime.Caller(1)
-	event := z.log.Debug()
-	if ok {
-		parts := strings.Split(file, "/")
-		shortPath := filepath.Base(file)
-		if len(parts) >= 2 {
-			shortPath = parts[len(parts)-2] + "/" + parts[len(parts)-1]
-		}
-		event = event.Str("caller", fmt.Sprintf("%s:%d", shortPath, line))
+var _ logger.Logger = (*ZeroLogger)(nil)
+
+func NewLogger(stage string) logger.Logger {
+	zerolog.TimeFieldFormat = time.RFC3339
+
+	if stage == "dev" {
+		out := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		return &ZeroLogger{log: zerolog.New(out).Level(zerolog.DebugLevel).With().Timestamp().Logger()}
 	}
-	z.appendFields(event, fields...)
-	event.Msg(msg)
+	return &ZeroLogger{log: zerolog.New(os.Stdout).Level(zerolog.InfoLevel).With().Timestamp().Logger()}
 }
 
-func (z *ZeroLogger) Info(msg string, fields ...logger.Field) {
-	_, file, line, ok := runtime.Caller(1)
-	event := z.log.Info()
-	if ok {
-		parts := strings.Split(file, "/")
-		shortPath := filepath.Base(file)
-		if len(parts) >= 2 {
-			shortPath = parts[len(parts)-2] + "/" + parts[len(parts)-1]
-		}
-		event = event.Str("caller", fmt.Sprintf("%s:%d", shortPath, line))
-	}
-	z.appendFields(event, fields...)
-	event.Msg(msg)
-}
-
-func (z *ZeroLogger) Warn(msg string, fields ...logger.Field) {
-	_, file, line, ok := runtime.Caller(1)
-	event := z.log.Warn()
-	if ok {
-		parts := strings.Split(file, "/")
-		shortPath := filepath.Base(file)
-		if len(parts) >= 2 {
-			shortPath = parts[len(parts)-2] + "/" + parts[len(parts)-1]
-		}
-		event = event.Str("caller", fmt.Sprintf("%s:%d", shortPath, line))
-	}
-	z.appendFields(event, fields...)
-	event.Msg(msg)
-}
+func (z *ZeroLogger) Debug(msg string, fields ...logger.Field) { z.write(z.log.Debug(), msg, fields) }
+func (z *ZeroLogger) Info(msg string, fields ...logger.Field)  { z.write(z.log.Info(), msg, fields) }
+func (z *ZeroLogger) Warn(msg string, fields ...logger.Field)  { z.write(z.log.Warn(), msg, fields) }
+func (z *ZeroLogger) Fatal(msg string, fields ...logger.Field) { z.write(z.log.Fatal(), msg, fields) }
 
 func (z *ZeroLogger) Error(msg string, fields ...logger.Field) {
-	_, file, line, ok := runtime.Caller(1)
-	event := z.log.Error()
-	if ok {
-		parts := strings.Split(file, "/")
-		shortPath := filepath.Base(file)
-		if len(parts) >= 2 {
-			shortPath = parts[len(parts)-2] + "/" + parts[len(parts)-1]
-		}
-		event = event.Str("caller", fmt.Sprintf("%s:%d", shortPath, line))
+	if logger.HasCanceled(fields) {
+		z.write(z.log.Warn(), msg, fields)
+		return
 	}
-	z.appendFields(event, fields...)
-	event.Msg(msg)
-}
-
-func (z *ZeroLogger) Fatal(msg string, fields ...logger.Field) {
-	_, file, line, ok := runtime.Caller(1)
-	event := z.log.Fatal()
-	if ok {
-		parts := strings.Split(file, "/")
-		shortPath := filepath.Base(file)
-		if len(parts) >= 2 {
-			shortPath = parts[len(parts)-2] + "/" + parts[len(parts)-1]
-		}
-		event = event.Str("caller", fmt.Sprintf("%s:%d", shortPath, line))
-	}
-	z.appendFields(event, fields...)
-	event.Msg(msg)
+	z.write(z.log.Error(), msg, fields)
 }
 
 func (z *ZeroLogger) With(fields ...logger.Field) logger.Logger {
-	contextLogger := z.log.With()
+	ctx := z.log.With()
 	for _, f := range fields {
-		contextLogger = contextLogger.Interface(f.Key, f.Value)
+		ctx = ctx.Interface(f.Key, f.Value)
 	}
-	return &ZeroLogger{log: contextLogger.Logger()}
+	return &ZeroLogger{log: ctx.Logger()}
 }
 
-func (z *ZeroLogger) appendFields(event *zerolog.Event, fields ...logger.Field) {
-	for _, f := range fields {
-		event.Interface(f.Key, f.Value)
-	}
-}
+func (z *ZeroLogger) Close() error { return nil }
 
-func (z *ZeroLogger) Close() error {
-	return nil
+// write 호출 위치(파일:줄)와 필드를 붙여 출력한다. Caller(2): write ← Info 등 ← 실제 호출자
+func (z *ZeroLogger) write(event *zerolog.Event, msg string, fields []logger.Field) {
+	if _, file, line, ok := runtime.Caller(2); ok {
+		event = event.Str("caller", fmt.Sprintf("%s/%s:%d", filepath.Base(filepath.Dir(file)), filepath.Base(file), line))
+	}
+	for _, f := range fields {
+		event = event.Interface(f.Key, f.Value)
+	}
+	event.Msg(msg)
 }

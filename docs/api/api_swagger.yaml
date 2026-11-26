@@ -1,17 +1,20 @@
 basePath: /api/v1
 definitions:
-  go-template_domain_user.User:
+  go-template_domain_user.AuthResult:
     properties:
       access_token:
         type: string
+      user:
+        $ref: '#/definitions/go-template_domain_user.User'
+    type: object
+  go-template_domain_user.User:
+    properties:
       created_at:
         type: string
       email:
         type: string
       id:
         type: integer
-      password_hash:
-        type: string
       updated_at:
         type: string
     type: object
@@ -25,9 +28,10 @@ definitions:
     - unauthorized
     - invalid input
     - forbidden
+    - payload too large
     - service unavailable
-    - Database Error
-    - Internal Server Error
+    - database error
+    - internal server error
     type: string
     x-enum-varnames:
     - Success
@@ -38,6 +42,7 @@ definitions:
     - UnAuthorized
     - InvalidInput
     - Forbidden
+    - PayloadTooLarge
     - ServiceUnavailable
     - DatabaseError
     - InternalError
@@ -48,15 +53,42 @@ definitions:
       data: {}
       error:
         type: string
+      errors:
+        description: 입력 검증 실패 시 필드별 사유
+        items:
+          $ref: '#/definitions/go-template_internal_validator.ErrorResponse'
+        type: array
       message:
         $ref: '#/definitions/go-template_internal_http.Message'
+    type: object
+  go-template_internal_validator.ErrorResponse:
+    properties:
+      field:
+        type: string
+      message:
+        type: string
     type: object
   internal_http_chi.CreateUserRequest:
     properties:
       email:
+        maxLength: 255
         type: string
       password:
+        description: bcrypt 는 72바이트까지만 쓴다
+        maxLength: 72
         minLength: 8
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  internal_http_chi.LoginRequest:
+    properties:
+      email:
+        maxLength: 255
+        type: string
+      password:
+        maxLength: 72
         type: string
     required:
     - email
@@ -86,6 +118,32 @@ paths:
       summary: Logout user
       tags:
       - Users
+  /app/user/me:
+    get:
+      description: Return the user of the access token.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/go-template_internal_http.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/go-template_domain_user.User'
+              type: object
+        "401":
+          description: unauthorized
+          schema:
+            $ref: '#/definitions/go-template_internal_http.Response'
+        "404":
+          description: user not found
+          schema:
+            $ref: '#/definitions/go-template_internal_http.Response'
+      summary: Get current user
+      tags:
+      - Users
   /user/create:
     post:
       consumes:
@@ -113,7 +171,7 @@ paths:
             - $ref: '#/definitions/go-template_internal_http.Response'
             - properties:
                 data:
-                  $ref: '#/definitions/go-template_domain_user.User'
+                  $ref: '#/definitions/go-template_domain_user.AuthResult'
               type: object
         "400":
           description: invalid input
@@ -128,6 +186,50 @@ paths:
           schema:
             $ref: '#/definitions/go-template_internal_http.Response'
       summary: Create user
+      tags:
+      - Users
+  /user/login:
+    post:
+      consumes:
+      - application/json
+      description: Verify email and password and issue an app access token cookie.
+      parameters:
+      - description: Login request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_http_chi.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          headers:
+            Set-Cookie:
+              description: go_template_access_token=...; Path=/api/v1/app; HttpOnly;
+                SameSite=Lax
+              type: string
+          schema:
+            allOf:
+            - $ref: '#/definitions/go-template_internal_http.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/go-template_domain_user.AuthResult'
+              type: object
+        "400":
+          description: invalid input
+          schema:
+            $ref: '#/definitions/go-template_internal_http.Response'
+        "401":
+          description: invalid email or password
+          schema:
+            $ref: '#/definitions/go-template_internal_http.Response'
+        "500":
+          description: internal server error
+          schema:
+            $ref: '#/definitions/go-template_internal_http.Response'
+      summary: Login
       tags:
       - Users
 swagger: "2.0"

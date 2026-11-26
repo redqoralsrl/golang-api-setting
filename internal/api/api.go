@@ -4,59 +4,48 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go-template/internal/logger"
 	"net/http"
-	"os/signal"
-	"syscall"
 	"time"
+
+	"go-template/internal/logger"
 )
 
-const TIMEOUT = 30 * time.Second
+const (
+	timeout         = 30 * time.Second
+	shutdownTimeout = 30 * time.Second
+)
 
-// Graceful shutdown
-func Start(l logger.Logger, port string, handler http.Handler) error {
+// Serve ctx 가 끝날 때까지 HTTP 서버를 돌리고, 끝나면 진행 중인 요청을 기다려 종료한다(graceful shutdown).
+func Serve(ctx context.Context, l logger.Logger, port string, handler http.Handler) error {
 	srv := &http.Server{
-		ReadTimeout:       TIMEOUT,
-		WriteTimeout:      TIMEOUT,
 		Addr:              ":" + port,
 		Handler:           handler,
+		ReadTimeout:       timeout,
+		WriteTimeout:      timeout,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT,
-	)
-	defer stop()
-	errShutdown := make(chan error, 1)
-	go shutdown(srv, ctx, errShutdown)
+	errCh := make(chan error, 1)
+	go func() {
+		l.Info(fmt.Sprintf("HTTP listening on port %s", port))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
 
-	l.Info(fmt.Sprintf("listening on port %s\n", port))
-	err := srv.ListenAndServe()
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+	select {
+	case err := <-errCh:
 		return err
+	case <-ctx.Done():
 	}
-	err = <-errShutdown
-	if err != nil {
-		return err
+
+	l.Info("Shutting down HTTP server")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("http shutdown: %w", err)
 	}
 	return nil
-}
-
-func shutdown(server *http.Server, ctxShutdown context.Context, errShutdown chan error) {
-	<-ctxShutdown.Done()
-
-	ctxTimeout, stop := context.WithTimeout(context.Background(), TIMEOUT)
-	defer stop()
-
-	err := server.Shutdown(ctxTimeout)
-	switch {
-	case err == nil:
-		errShutdown <- nil
-	case errors.Is(err, context.DeadlineExceeded):
-		errShutdown <- fmt.Errorf("forcing closing the server")
-	default:
-		errShutdown <- fmt.Errorf("forcing closing the server")
-	}
 }

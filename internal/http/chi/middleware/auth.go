@@ -1,12 +1,13 @@
 package middleware
 
 import (
-	"context"
 	"errors"
+	"net/http"
+	"slices"
+
+	"go-template/internal/auth"
 	response "go-template/internal/http"
 	"go-template/internal/jwt"
-	"net/http"
-	"time"
 )
 
 type AuthMiddleware struct {
@@ -14,30 +15,12 @@ type AuthMiddleware struct {
 	allowAuthorizationHeader bool
 }
 
-type Role string
-
-const (
-	UserRole Role = "user"
-)
-
-type contextKey string
-
-const (
-	UserIDKey contextKey = "user_id"
-	RoleKey   contextKey = "role"
-)
-
-const (
-	UserExpired time.Duration = 1 * time.Hour
-)
-
+// NewAuthMiddleware allowAuthorizationHeader 가 true(dev)면 쿠키가 없을 때 Authorization: Bearer 도 받는다.
 func NewAuthMiddleware(jwtAdapter *jwt.JWTAdapter, allowAuthorizationHeader bool) *AuthMiddleware {
-	return &AuthMiddleware{
-		jwtAdapter:               jwtAdapter,
-		allowAuthorizationHeader: allowAuthorizationHeader,
-	}
+	return &AuthMiddleware{jwtAdapter: jwtAdapter, allowAuthorizationHeader: allowAuthorizationHeader}
 }
 
+// Authenticate 앱 사용자 토큰을 확인하고 auth.Identity 를 context 에 넣는다. auth.FromContext 로 꺼낸다.
 func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := ExtractAppAuthToken(r, m.allowAuthorizationHeader)
@@ -47,42 +30,29 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 		}
 
 		claims, err := m.jwtAdapter.ValidateToken(token)
-		if err != nil {
+		if err != nil || claims.Role != string(auth.RoleUser) {
 			response.WriteError(w, http.StatusUnauthorized, response.UnAuthorized, errors.New("invalid token"))
 			return
 		}
 
-		if claims.Role != string(UserRole) {
-			response.WriteError(w, http.StatusUnauthorized, response.UnAuthorized, errors.New("invalid token type"))
-			return
-		}
-
-		// Context에 사용자 정보 추가
-		ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
-		ctx = context.WithValue(ctx, RoleKey, claims.Role)
-
+		ctx := auth.WithIdentity(r.Context(), auth.Identity{UserID: claims.UserID, Role: auth.Role(claims.Role)})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func (m *AuthMiddleware) RequireRole(roles []Role) func(http.Handler) http.Handler {
+// RequireRole Authenticate 뒤에 붙인다. 역할이 roles 중 하나가 아니면 403.
+func RequireRole(roles ...auth.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userRole := r.Context().Value(RoleKey).(string)
-
-			hasRole := false
-			for _, role := range roles {
-				if Role(userRole) == role {
-					hasRole = true
-					break
-				}
+			id, ok := auth.FromContext(r.Context())
+			if !ok {
+				response.WriteError(w, http.StatusUnauthorized, response.UnAuthorized, errors.New("unauthorized"))
+				return
 			}
-
-			if !hasRole {
+			if !slices.Contains(roles, id.Role) {
 				response.WriteError(w, http.StatusForbidden, response.Forbidden, errors.New("insufficient permissions"))
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}

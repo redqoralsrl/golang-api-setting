@@ -6,20 +6,27 @@ import (
 )
 
 type User struct {
-	ID           int       `json:"id"`
+	ID           int64     `json:"id"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Email        string    `json:"email"`
-	PasswordHash string    `json:"password_hash,omitempty"`
-	AccessToken  string    `json:"access_token,omitempty"`
+	PasswordHash string    `json:"-"` // 응답에 절대 싣지 않는다
+}
+
+// AuthResult 가입·로그인 결과. AccessToken 은 dev 에서만 바디로 내려간다(그 외는 쿠키).
+type AuthResult struct {
+	User        *User  `json:"user"`
+	AccessToken string `json:"access_token,omitempty"`
 }
 
 type Reader interface {
+	GetByEmail(ctx context.Context, email string) (*User, error)
+	GetByID(ctx context.Context, id int64) (*User, error)
 }
 
 type Writer interface {
 	Create(ctx context.Context, email, passwordHash string) (*User, error)
-	CreateLoginLog(ctx context.Context, userID int) error
+	CreateLoginLog(ctx context.Context, userID int64) error
 }
 
 type Repository interface {
@@ -28,9 +35,12 @@ type Repository interface {
 }
 
 type UseCase interface {
-	Create(ctx context.Context, email, password string) (*User, error)
+	Create(ctx context.Context, email, password string) (*AuthResult, error)
+	Login(ctx context.Context, email, password string) (*AuthResult, error)
+	Get(ctx context.Context, id int64) (*User, error)
 }
 
-type JwtAdapter interface {
+// TokenIssuer access token 발급 (internal/jwt 가 구현)
+type TokenIssuer interface {
 	GenerateToken(userID, role string, expired time.Duration) (string, error)
 }

@@ -6,8 +6,8 @@ import (
 )
 
 type ErrorLog struct {
-	ID           int       `json:"id"`
-	Timestamp    time.Time `json:"timestamp"`
+	ID           int64     `json:"id"`
+	OccurredAt   time.Time `json:"occurred_at"`
 	IPAddress    string    `json:"ip_address"`
 	UserAgent    string    `json:"user_agent"`
 	Path         string    `json:"path"`
@@ -17,10 +17,10 @@ type ErrorLog struct {
 	ErrorMessage string    `json:"error_message"`
 }
 
-type Reader interface{}
+type Reader any
 
 type Writer interface {
-	Create(ctx context.Context, errorLog *ErrorLog) (*ErrorLog, error)
+	Create(ctx context.Context, errorLog *ErrorLog) error
 }
 
 type Repository interface {
@@ -29,5 +29,5 @@ type Repository interface {
 }
 
 type UseCase interface {
-	Create(ctx context.Context, errorLog *ErrorLog) (*ErrorLog, error)
+	Create(ctx context.Context, errorLog *ErrorLog) error
 }

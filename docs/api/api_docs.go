@@ -41,6 +41,50 @@ const docTemplateapi = `{
                 }
             }
         },
+        "/app/user/me": {
+            "get": {
+                "description": "Return the user of the access token.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Get current user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/go-template_internal_http.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/go-template_domain_user.User"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/go-template_internal_http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "user not found",
+                        "schema": {
+                            "$ref": "#/definitions/go-template_internal_http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/user/create": {
             "post": {
                 "description": "Create a new user account and issue an app access token cookie.",
@@ -77,7 +121,7 @@ const docTemplateapi = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/go-template_domain_user.User"
+                                            "$ref": "#/definitions/go-template_domain_user.AuthResult"
                                         }
                                     }
                                 }
@@ -110,15 +154,93 @@ const docTemplateapi = `{
                     }
                 }
             }
+        },
+        "/user/login": {
+            "post": {
+                "description": "Verify email and password and issue an app access token cookie.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Login",
+                "parameters": [
+                    {
+                        "description": "Login request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_http_chi.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/go-template_internal_http.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/go-template_domain_user.AuthResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "Set-Cookie": {
+                                "type": "string",
+                                "description": "go_template_access_token=...; Path=/api/v1/app; HttpOnly; SameSite=Lax"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "invalid input",
+                        "schema": {
+                            "$ref": "#/definitions/go-template_internal_http.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "invalid email or password",
+                        "schema": {
+                            "$ref": "#/definitions/go-template_internal_http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/go-template_internal_http.Response"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
-        "go-template_domain_user.User": {
+        "go-template_domain_user.AuthResult": {
             "type": "object",
             "properties": {
                 "access_token": {
                     "type": "string"
                 },
+                "user": {
+                    "$ref": "#/definitions/go-template_domain_user.User"
+                }
+            }
+        },
+        "go-template_domain_user.User": {
+            "type": "object",
+            "properties": {
                 "created_at": {
                     "type": "string"
                 },
@@ -127,9 +249,6 @@ const docTemplateapi = `{
                 },
                 "id": {
                     "type": "integer"
-                },
-                "password_hash": {
-                    "type": "string"
                 },
                 "updated_at": {
                     "type": "string"
@@ -147,9 +266,10 @@ const docTemplateapi = `{
                 "unauthorized",
                 "invalid input",
                 "forbidden",
+                "payload too large",
                 "service unavailable",
-                "Database Error",
-                "Internal Server Error"
+                "database error",
+                "internal server error"
             ],
             "x-enum-varnames": [
                 "Success",
@@ -160,6 +280,7 @@ const docTemplateapi = `{
                 "UnAuthorized",
                 "InvalidInput",
                 "Forbidden",
+                "PayloadTooLarge",
                 "ServiceUnavailable",
                 "DatabaseError",
                 "InternalError"
@@ -175,8 +296,26 @@ const docTemplateapi = `{
                 "error": {
                     "type": "string"
                 },
+                "errors": {
+                    "description": "입력 검증 실패 시 필드별 사유",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/go-template_internal_validator.ErrorResponse"
+                    }
+                },
                 "message": {
                     "$ref": "#/definitions/go-template_internal_http.Message"
+                }
+            }
+        },
+        "go-template_internal_validator.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -188,11 +327,31 @@ const docTemplateapi = `{
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "password": {
+                    "description": "bcrypt 는 72바이트까지만 쓴다",
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                }
+            }
+        },
+        "internal_http_chi.LoginRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "password"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "password": {
                     "type": "string",
-                    "minLength": 8
+                    "maxLength": 72
                 }
             }
         }

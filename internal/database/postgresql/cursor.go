@@ -6,74 +6,54 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
+// Cursor 페이지네이션 커서(마지막 id)를 AES-GCM 으로 암호화한다. 클라이언트가 id 를 추측·조작하지 못한다.
 type Cursor struct {
-	secretKey []byte
+	aead cipher.AEAD
 }
 
-func NewCursor(secretKey []byte) *Cursor {
-
-	return &Cursor{secretKey: secretKey}
+// NewCursor secretKey 는 16, 24, 32바이트 중 하나(AES-128/192/256)
+func NewCursor(secretKey []byte) (*Cursor, error) {
+	block, err := aes.NewCipher(secretKey)
+	if err != nil {
+		return nil, fmt.Errorf("cursor secret: %w", err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return &Cursor{aead: aead}, nil
 }
 
-func (c *Cursor) Encrypt(id int) (string, error) {
-	block, err := aes.NewCipher(c.secretKey)
-	if err != nil {
-		return "", err
-	}
+func (c *Cursor) Encrypt(id int64) (string, error) {
+	plaintext := binary.BigEndian.AppendUint64(nil, uint64(id))
 
-	aesGCM, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	plaintext := make([]byte, 4)
-	binary.BigEndian.PutUint32(plaintext, uint32(id))
-
-	// Generate a random nonce
-	nonce := make([]byte, aesGCM.NonceSize())
+	nonce := make([]byte, c.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
 
-	// Encrypt with authentication
-	ciphertext := aesGCM.Seal(nonce, nonce, plaintext, nil)
-
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
+	return base64.RawURLEncoding.EncodeToString(c.aead.Seal(nonce, nonce, plaintext, nil)), nil
 }
 
-func (c *Cursor) Decrypt(encodedCursor string) (int, error) {
-	data, err := base64.URLEncoding.DecodeString(encodedCursor)
+func (c *Cursor) Decrypt(encoded string) (int64, error) {
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return 0, err
+		return 0, errors.New("invalid cursor")
 	}
 
-	block, err := aes.NewCipher(c.secretKey)
-	if err != nil {
-		return 0, err
-	}
-
-	aesGCM, err := cipher.NewGCM(block)
-	if err != nil {
-		return 0, err
-	}
-
-	nonceSize := aesGCM.NonceSize()
+	nonceSize := c.aead.NonceSize()
 	if len(data) < nonceSize {
-		return 0, fmt.Errorf("ciphertext too short")
+		return 0, errors.New("invalid cursor")
 	}
 
-	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return 0, fmt.Errorf("decryption failed: %w", err)
+	plaintext, err := c.aead.Open(nil, data[:nonceSize], data[nonceSize:], nil)
+	if err != nil || len(plaintext) != 8 {
+		return 0, errors.New("invalid cursor")
 	}
 
-	if len(plaintext) != 4 {
-		return 0, fmt.Errorf("invalid plaintext length")
-	}
-
-	return int(binary.BigEndian.Uint32(plaintext)), nil
+	return int64(binary.BigEndian.Uint64(plaintext)), nil
 }
