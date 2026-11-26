@@ -34,7 +34,7 @@ type Response struct {
 	Message Message                   `json:"message"`
 	Error   *string                   `json:"error,omitempty"`
 	Errors  []validator.ErrorResponse `json:"errors,omitempty"` // 입력 검증 실패 시 필드별 사유
-	Data    interface{}               `json:"data"`
+	Data    any                       `json:"data"`
 }
 
 func write(w http.ResponseWriter, res Response) {
@@ -43,7 +43,7 @@ func write(w http.ResponseWriter, res Response) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-func WriteResponse(w http.ResponseWriter, code int, message Message, err *string, data interface{}) {
+func WriteResponse(w http.ResponseWriter, code int, message Message, err *string, data any) {
 	write(w, Response{Code: code, Message: message, Error: err, Data: data})
 }
 

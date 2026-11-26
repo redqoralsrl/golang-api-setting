@@ -18,12 +18,12 @@ type Logger interface {
 
 type Field struct {
 	Key   string
-	Value interface{}
+	Value any
 	// Canceled 클라이언트가 요청을 끊어 작업이 멈춘 오류다. 서버 장애가 아니므로 구현체는 Error 대신 Warn 으로 남긴다.
 	Canceled bool
 }
 
-func NewField(key string, value interface{}) Field {
+func NewField(key string, value any) Field {
 	return Field{Key: key, Value: value}
 }
 

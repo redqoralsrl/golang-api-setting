@@ -160,7 +160,7 @@ func requestFields(r *http.Request) []logger.Field {
 }
 
 // readLoggableBody 작은 JSON 바디만 읽어 마스킹한다. 읽은 바디는 핸들러가 다시 읽을 수 있게 되돌려 둔다.
-func readLoggableBody(r *http.Request) map[string]interface{} {
+func readLoggableBody(r *http.Request) map[string]any {
 	if r.Body == nil || r.ContentLength <= 0 || r.ContentLength > maxLoggedBodyBytes ||
 		!strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		return nil
@@ -172,7 +172,7 @@ func readLoggableBody(r *http.Request) map[string]interface{} {
 		return nil
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	if json.Unmarshal(bodyBytes, &body) != nil {
 		return nil
 	}
@@ -180,22 +180,22 @@ func readLoggableBody(r *http.Request) map[string]interface{} {
 }
 
 // maskSensitiveData loggableBodyFields에 없는 필드의 값을 가린다. 중첩 객체와 배열도 같은 규칙을 적용한다.
-func maskSensitiveData(data map[string]interface{}) map[string]interface{} {
-	masked := make(map[string]interface{}, len(data))
+func maskSensitiveData(data map[string]any) map[string]any {
+	masked := make(map[string]any, len(data))
 	for k, v := range data {
 		masked[k] = maskValue(v, loggableBodyFields[strings.ToLower(k)])
 	}
 	return masked
 }
 
-func maskValue(v interface{}, allowed bool) interface{} {
+func maskValue(v any, allowed bool) any {
 	switch t := v.(type) {
 	case nil:
 		return nil
-	case map[string]interface{}:
+	case map[string]any:
 		return maskSensitiveData(t)
-	case []interface{}:
-		items := make([]interface{}, len(t))
+	case []any:
+		items := make([]any, len(t))
 		for i, item := range t {
 			items[i] = maskValue(item, allowed)
 		}

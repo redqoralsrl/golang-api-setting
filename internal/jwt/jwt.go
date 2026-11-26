@@ -49,7 +49,7 @@ func (a *JWTAdapter) GenerateToken(userID, role string, expired time.Duration) (
 
 func (a *JWTAdapter) ValidateToken(tokenString string) (*Claims, error) {
 	claims := &Claims{}
-	token, err := a.parser.ParseWithClaims(tokenString, claims, func(*jwt.Token) (interface{}, error) {
+	token, err := a.parser.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) {
 		return a.secretKey, nil
 	})
 	if err != nil {

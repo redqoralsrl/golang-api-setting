@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -44,6 +45,33 @@ func (s *Service) Create(ctx context.Context, email, password string) (*AuthResu
 	}
 
 	return s.issue(u)
+}
+
+// dummyHash 없는 이메일로 로그인해도 bcrypt 비교를 한 번 해서 응답 시간으로 계정 존재 여부가 드러나지 않게 한다.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("dummy-password"), bcrypt.DefaultCost)
+
+func (s *Service) Login(ctx context.Context, email, password string) (*AuthResult, error) {
+	u, err := s.repo.GetByEmail(ctx, normalizeEmail(email))
+	if errors.Is(err, ErrUserNotFound) {
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+		return nil, ErrInvalidCredentials
+	}
+	if err != nil {
+		return nil, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	// 로그인 기록 실패로 로그인을 막지는 않는다
+	if err := s.repo.CreateLoginLog(ctx, u.ID); err != nil {
+		s.logger.Warn("failed to create user login log", logger.NewField("user_id", u.ID), logger.NewError(err))
+	}
+	return s.issue(u)
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (*User, error) {
+	return s.repo.GetByID(ctx, id)
 }
 
 func (s *Service) issue(u *User) (*AuthResult, error) {

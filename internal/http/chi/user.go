@@ -3,6 +3,7 @@ package chi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"go-template/domain/user"
@@ -24,7 +25,14 @@ func UserHandler(s user.UseCase, handler Handler, l logger.Logger, isDev bool) {
 	h := &userHandler{useCase: s, validator: handler.v, logger: l, isDev: isDev}
 
 	handler.Routes.Public.Post("/user/create", h.CreateUser)
+	handler.Routes.Public.Post("/user/login", h.Login)
+	handler.Routes.App.Get("/user/me", h.Me)
 	handler.Routes.App.Post("/user/logout", h.Logout)
+}
+
+type LoginRequest struct {
+	Email    string `json:"email" validate:"required,email,max=255"`
+	Password string `json:"password" validate:"required,max=72"`
 }
 
 type CreateUserRequest struct {
@@ -64,6 +72,71 @@ func (h *userHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	h.issueSession(w, result)
 	response.WriteResponse(w, http.StatusCreated, response.Success, nil, result)
+}
+
+// Login godoc
+// @Summary Login
+// @Description Verify email and password and issue an app access token cookie.
+// @Tags Users
+// @Accept json
+// @Produce json
+// @Param request body LoginRequest true "Login request"
+// @Success 200 {object} response.Response{data=user.AuthResult}
+// @Header 200 {string} Set-Cookie "go_template_access_token=...; Path=/api/v1/app; HttpOnly; SameSite=Lax"
+// @Failure 400 {object} response.Response "invalid input"
+// @Failure 401 {object} response.Response "invalid email or password"
+// @Failure 500 {object} response.Response "internal server error"
+// @Router /user/login [post]
+func (h *userHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if !bindJSON(w, r, h.validator, &req) {
+		return
+	}
+
+	result, err := h.useCase.Login(r.Context(), req.Email, req.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, user.ErrInvalidCredentials):
+			response.WriteError(w, http.StatusUnauthorized, response.UnAuthorized, user.ErrInvalidCredentials)
+		default:
+			response.WriteErrorWithRequest(w, r, h.logger, http.StatusInternalServerError, response.InternalError, err)
+		}
+		return
+	}
+
+	h.issueSession(w, result)
+	response.WriteResponse(w, http.StatusOK, response.Success, nil, result)
+}
+
+// Me godoc
+// @Summary Get current user
+// @Description Return the user of the access token.
+// @Tags Users
+// @Produce json
+// @Success 200 {object} response.Response{data=user.User}
+// @Failure 401 {object} response.Response "unauthorized"
+// @Failure 404 {object} response.Response "user not found"
+// @Router /app/user/me [get]
+func (h *userHandler) Me(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.FromContext(r.Context())
+	userID, err := strconv.ParseInt(id.UserID, 10, 64)
+	if !ok || err != nil {
+		response.WriteError(w, http.StatusUnauthorized, response.UnAuthorized, errors.New("unauthorized"))
+		return
+	}
+
+	u, err := h.useCase.Get(r.Context(), userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, user.ErrUserNotFound):
+			response.WriteError(w, http.StatusNotFound, response.NotFound, user.ErrUserNotFound)
+		default:
+			response.WriteErrorWithRequest(w, r, h.logger, http.StatusInternalServerError, response.InternalError, err)
+		}
+		return
+	}
+
+	response.WriteResponse(w, http.StatusOK, response.Success, nil, u)
 }
 
 // Logout godoc

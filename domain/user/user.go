@@ -36,6 +36,8 @@ type Repository interface {
 
 type UseCase interface {
 	Create(ctx context.Context, email, password string) (*AuthResult, error)
+	Login(ctx context.Context, email, password string) (*AuthResult, error)
+	Get(ctx context.Context, id int64) (*User, error)
 }
 
 // TokenIssuer access token 발급 (internal/jwt 가 구현)

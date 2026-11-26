@@ -17,7 +17,7 @@ type ErrorLog struct {
 	ErrorMessage string    `json:"error_message"`
 }
 
-type Reader interface{}
+type Reader any
 
 type Writer interface {
 	Create(ctx context.Context, errorLog *ErrorLog) error

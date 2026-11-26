@@ -6,7 +6,7 @@ import (
 )
 
 type ValidationService interface {
-	Validate(interface{}) []ErrorResponse
+	Validate(any) []ErrorResponse
 }
 
 type validationService struct {
@@ -14,18 +14,18 @@ type validationService struct {
 	trans     ut.Translator
 }
 
-func NewValidationService() (ValidationService, error) {
-	v, trans, err := NewValidator()
+// NewValidationService extra 로 선택 모듈의 규칙을 더한다.
+//
+//	validator.NewValidationService(blockchain.ValidationRules()...)
+func NewValidationService(extra ...Rule) (ValidationService, error) {
+	v, trans, err := NewValidator(extra...)
 	if err != nil {
 		return nil, err
 	}
-	return &validationService{
-		validator: v,
-		trans:     trans,
-	}, nil
+	return &validationService{validator: v, trans: trans}, nil
 }
 
-func (s *validationService) Validate(data interface{}) []ErrorResponse {
+func (s *validationService) Validate(data any) []ErrorResponse {
 	if err := s.validator.Struct(data); err != nil {
 		return TranslateError(err, s.trans)
 	}
