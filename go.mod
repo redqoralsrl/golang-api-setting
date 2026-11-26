@@ -2,6 +2,8 @@ module go-template
 
 go 1.26.0
 
+toolchain go1.26.11
+
 tool (
 	github.com/air-verse/air
 	github.com/sqlc-dev/sqlc/cmd/sqlc
@@ -69,7 +71,7 @@ require (
 	github.com/gohugoio/hugo v0.149.1 // indirect
 	github.com/google/cel-go v0.26.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
