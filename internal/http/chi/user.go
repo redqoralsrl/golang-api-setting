@@ -54,8 +54,8 @@ func (h *userHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	result, err := h.useCase.Create(r.Context(), req.Email, req.Password)
 	if err != nil {
 		switch {
-		case errors.Is(err, user.ErrUserUniqueViolation):
-			response.WriteError(w, http.StatusConflict, response.Conflict, user.ErrUserUniqueViolation)
+		case errors.Is(err, user.ErrUserAlreadyExists):
+			response.WriteError(w, http.StatusConflict, response.Conflict, user.ErrUserAlreadyExists)
 		default:
 			response.WriteErrorWithRequest(w, r, h.logger, http.StatusInternalServerError, response.InternalError, err)
 		}

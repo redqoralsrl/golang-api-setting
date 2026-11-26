@@ -10,9 +10,25 @@ import (
 	"time"
 )
 
-const createErrorLog = `-- name: CreateErrorLog :one
+const advisoryUnlock = `-- name: AdvisoryUnlock :one
+select pg_advisory_unlock($1::int4, $2::int4)::bool
+`
+
+type AdvisoryUnlockParams struct {
+	Ns  int32 `json:"ns"`
+	Key int32 `json:"key"`
+}
+
+func (q *Queries) AdvisoryUnlock(ctx context.Context, arg AdvisoryUnlockParams) (bool, error) {
+	row := q.db.QueryRow(ctx, advisoryUnlock, arg.Ns, arg.Key)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createErrorLog = `-- name: CreateErrorLog :exec
 insert into v1.error_log (
-    timestamp,
+    occurred_at,
     ip_address,
     user_agent,
     path,
@@ -30,20 +46,10 @@ insert into v1.error_log (
     $7,
     $8
 )
-returning
-    id,
-    timestamp,
-    ip_address,
-    user_agent,
-    path,
-    http_method,
-    requested_url,
-    error_code,
-    error_message
 `
 
 type CreateErrorLogParams struct {
-	Timestamp    time.Time `json:"timestamp"`
+	OccurredAt   time.Time `json:"occurred_at"`
 	IpAddress    string    `json:"ip_address"`
 	UserAgent    string    `json:"user_agent"`
 	Path         string    `json:"path"`
@@ -53,9 +59,9 @@ type CreateErrorLogParams struct {
 	ErrorMessage string    `json:"error_message"`
 }
 
-func (q *Queries) CreateErrorLog(ctx context.Context, arg CreateErrorLogParams) (V1ErrorLog, error) {
-	row := q.db.QueryRowContext(ctx, createErrorLog,
-		arg.Timestamp,
+func (q *Queries) CreateErrorLog(ctx context.Context, arg CreateErrorLogParams) error {
+	_, err := q.db.Exec(ctx, createErrorLog,
+		arg.OccurredAt,
 		arg.IpAddress,
 		arg.UserAgent,
 		arg.Path,
@@ -64,35 +70,13 @@ func (q *Queries) CreateErrorLog(ctx context.Context, arg CreateErrorLogParams) 
 		arg.ErrorCode,
 		arg.ErrorMessage,
 	)
-	var i V1ErrorLog
-	err := row.Scan(
-		&i.ID,
-		&i.Timestamp,
-		&i.IpAddress,
-		&i.UserAgent,
-		&i.Path,
-		&i.HttpMethod,
-		&i.RequestedUrl,
-		&i.ErrorCode,
-		&i.ErrorMessage,
-	)
-	return i, err
+	return err
 }
 
 const createUser = `-- name: CreateUser :one
-insert into v1.users (
-    email,
-    password_hash
-) values (
-    $1,
-    $2
-)
-returning
-    id,
-    created_at,
-    updated_at,
-    email,
-    password_hash
+insert into v1.users (email, password_hash)
+values ($1, $2)
+returning id, created_at, updated_at, email, password_hash
 `
 
 type CreateUserParams struct {
@@ -101,7 +85,7 @@ type CreateUserParams struct {
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (V1User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.Email, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash)
 	var i V1User
 	err := row.Scan(
 		&i.ID,
@@ -114,17 +98,95 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (V1User,
 }
 
 const createUserLoginLog = `-- name: CreateUserLoginLog :exec
-insert into v1.user_login_logs (
-    user_id
-)
+insert into v1.user_login_logs (user_id)
 values ($1)
 `
 
 type CreateUserLoginLogParams struct {
-	UserID int32 `json:"user_id"`
+	UserID int64 `json:"user_id"`
 }
 
 func (q *Queries) CreateUserLoginLog(ctx context.Context, arg CreateUserLoginLogParams) error {
-	_, err := q.db.ExecContext(ctx, createUserLoginLog, arg.UserID)
+	_, err := q.db.Exec(ctx, createUserLoginLog, arg.UserID)
 	return err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+select id, created_at, updated_at, email, password_hash
+from v1.users
+where lower(email) = lower($1)
+`
+
+type GetUserByEmailParams struct {
+	Email string `json:"email"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (V1User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, arg.Email)
+	var i V1User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.PasswordHash,
+	)
+	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+select id, created_at, updated_at, email, password_hash
+from v1.users
+where id = $1
+`
+
+type GetUserByIDParams struct {
+	ID int64 `json:"id"`
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (V1User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, arg.ID)
+	var i V1User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.PasswordHash,
+	)
+	return i, err
+}
+
+const tryAdvisoryLock = `-- name: TryAdvisoryLock :one
+select pg_try_advisory_lock($1::int4, $2::int4)::bool
+`
+
+type TryAdvisoryLockParams struct {
+	Ns  int32 `json:"ns"`
+	Key int32 `json:"key"`
+}
+
+func (q *Queries) TryAdvisoryLock(ctx context.Context, arg TryAdvisoryLockParams) (bool, error) {
+	row := q.db.QueryRow(ctx, tryAdvisoryLock, arg.Ns, arg.Key)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const tryAdvisoryXactLock = `-- name: TryAdvisoryXactLock :one
+
+select pg_try_advisory_xact_lock($1::int4, $2::int4)::bool
+`
+
+type TryAdvisoryXactLockParams struct {
+	Ns  int32 `json:"ns"`
+	Key int32 `json:"key"`
+}
+
+// 공용 쿼리 (advisory lock). 도메인 쿼리는 domain/<name>/postgresql/query.sql 에 둔다.
+func (q *Queries) TryAdvisoryXactLock(ctx context.Context, arg TryAdvisoryXactLockParams) (bool, error) {
+	row := q.db.QueryRow(ctx, tryAdvisoryXactLock, arg.Ns, arg.Key)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }

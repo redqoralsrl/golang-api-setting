@@ -5,22 +5,10 @@ import (
 	"fmt"
 )
 
-// postgres error code name
-const (
-	ErrDBSyntaxError               = "syntax_error"
-	ErrDBUniqueViolation           = "unique_violation"
-	ErrDBNotNullViolation          = "not_null_violation"
-	ErrDBStringDataRightTruncation = "string_data_right_truncation"
-	ErrDBInvalidTextRepresentation = "invalid_text_representation"
-)
-
+// 도메인 에러. repository 가 DB 에러를 이것으로 바꿔 돌려주고, 핸들러는 이것으로 status 를 정한다.
 var (
-	ErrUserSyntaxError               = errors.New("input type error")
-	ErrUserUniqueViolation           = errors.New("user already exists")
-	ErrUserNotNullViolation          = errors.New("null value error")
-	ErrUserStringDataRightTruncation = errors.New("data truncation error")
-	ErrUserInvalidTextRepresentation = errors.New("data value error")
-	ErrUserNotFound                  = errors.New("user not found")
+	ErrUserAlreadyExists = errors.New("user already exists")
+	ErrUserNotFound      = errors.New("user not found")
 )
 
 func NewDatabaseError(operation string, cause error) error {
@@ -29,8 +17,4 @@ func NewDatabaseError(operation string, cause error) error {
 
 func NewAuthError(operation string, cause error) error {
 	return fmt.Errorf("auth operation %q failed: %w", operation, cause)
-}
-
-func NewJwtError(email string, cause error) error {
-	return fmt.Errorf("jwt error user %q failed: %w", email, cause)
 }

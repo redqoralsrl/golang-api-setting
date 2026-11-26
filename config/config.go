@@ -26,11 +26,7 @@ type Config struct {
 	APIPort string
 	// GRPCPort string // gRPC 미사용. 활성화 방법은 GRPC.md
 
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBHost     string
-	DBPort     string
+	DB Database
 
 	// Redis 는 아직 연결하지 않는다 (internal/database/redis)
 	RedisHost     string
@@ -63,11 +59,6 @@ func Load() (*Config, error) {
 		Stage:           Stage(env("STAGE", string(StageDev))),
 		APIHost:         os.Getenv("API_HOST"),
 		APIPort:         env("API_PORT", "8080"),
-		DBUser:          os.Getenv("DB_USER"),
-		DBPassword:      os.Getenv("DB_PASSWORD"),
-		DBName:          os.Getenv("DB_NAME"),
-		DBHost:          os.Getenv("DB_HOST"),
-		DBPort:          env("DB_PORT", "5432"),
 		RedisHost:       os.Getenv("REDIS_HOST"),
 		RedisPort:       os.Getenv("REDIS_PORT"),
 		RedisPassword:   os.Getenv("REDIS_PASSWORD"),
@@ -81,8 +72,11 @@ func Load() (*Config, error) {
 		SwaggerPassword: os.Getenv("SWAGGER_PASSWORD"),
 	}
 
-	c.CORSAllowedOrigins = envList("CORS_ALLOWED_ORIGINS")
 	var err error
+	if c.DB, err = LoadDatabase(); err != nil {
+		errs = append(errs, err)
+	}
+	c.CORSAllowedOrigins = envList("CORS_ALLOWED_ORIGINS")
 	if c.TrustedProxyHops, err = envInt("TRUSTED_PROXY_HOPS", 0); err != nil {
 		errs = append(errs, err)
 	}
@@ -115,17 +109,6 @@ func (c *Config) validate() []error {
 		errs = append(errs, errors.New("TRUSTED_PROXY_HOPS must be 0 or greater"))
 	}
 
-	required := []struct{ name, value string }{
-		{"DB_USER", c.DBUser},
-		{"DB_PASSWORD", c.DBPassword},
-		{"DB_NAME", c.DBName},
-		{"DB_HOST", c.DBHost},
-	}
-	for _, r := range required {
-		if strings.TrimSpace(r.value) == "" {
-			errs = append(errs, fmt.Errorf("%s is required", r.name))
-		}
-	}
 	if !c.IsDev() && len(c.CORSAllowedOrigins) == 0 {
 		errs = append(errs, errors.New("CORS_ALLOWED_ORIGINS is required outside dev"))
 	}

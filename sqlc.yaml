@@ -3,16 +3,18 @@ version: "2"
 sql:
   - name: "postgres"
     engine: "postgresql"
-    schema: "./ops/db/init.sql"
-    queries: 
-        - "./domain/errorlog/postgresql/query.sql"
-        - "./domain/user/postgresql/query.sql"
+    # goose 마이그레이션 파일을 스키마로 읽는다 (Down 구간은 무시)
+    schema: "./migrations"
+    queries:
+      - "./internal/database/postgresql/query.sql"
+      - "./domain/errorlog/postgresql/query.sql"
+      - "./domain/user/postgresql/query.sql"
     strict_order_by: true
     gen:
       go:
         package: "gen"
         out: "./internal/database/postgresql/gen"
-        sql_package: "database/sql"
+        sql_package: "pgx/v5"
 
         emit_json_tags: true
         json_tags_case_style: "snake"
@@ -26,3 +28,19 @@ sql:
         output_db_file_name: "db.go"
         output_models_file_name: "models.go"
         output_querier_file_name: "querier.go"
+        overrides:
+          # pgtype.Timestamptz 대신 time.Time 을 쓴다
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              type: "github.com/google/uuid.UUID"
+              pointer: true

@@ -129,7 +129,7 @@ func LoggerMiddleware(l logger.Logger, errorLogService errorlogDomain.UseCase) f
 
 			if shouldPersistErrorLog(status) {
 				persister.enqueue(&errorlogDomain.ErrorLog{
-					Timestamp:    time.Now().UTC(),
+					OccurredAt:   time.Now().UTC(),
 					IPAddress:    ClientIP(r),
 					UserAgent:    strings.TrimSpace(r.UserAgent()),
 					Path:         r.URL.Path,
@@ -330,7 +330,7 @@ func (p *errorLogPersister) enqueue(e *errorlogDomain.ErrorLog) {
 func (p *errorLogPersister) run() {
 	for e := range p.queue {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if _, err := p.service.Create(ctx, e); err != nil {
+		if err := p.service.Create(ctx, e); err != nil {
 			p.logger.Warn("failed to persist error log", logger.NewField("status", e.ErrorCode), logger.NewError(err))
 		}
 		cancel()

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -49,7 +50,7 @@ func main() {
 	cfg := Config{}
 	flag.StringVar(&cfg.Table, "table", "", "table name, e.g. v1.notices")
 	flag.StringVar(&cfg.Name, "name", "", "domain package name, e.g. notice")
-	flag.StringVar(&cfg.SchemaSQL, "schema", "./ops/db/init.sql", "schema sql path")
+	flag.StringVar(&cfg.SchemaSQL, "schema", "./migrations", "schema sql file or goose migrations dir")
 	flag.StringVar(&cfg.SQLCYAML, "sqlc", "./sqlc.yaml", "sqlc yaml path")
 	flag.StringVar(&cfg.Module, "module", "", "go module path")
 	flag.BoolVar(&cfg.Overwrite, "overwrite", false, "overwrite generated files")
@@ -75,12 +76,12 @@ func run(cfg Config) error {
 		}
 	}
 
-	sqlBytes, err := os.ReadFile(cfg.SchemaSQL)
+	schema, err := readSchema(cfg.SchemaSQL)
 	if err != nil {
 		return err
 	}
 
-	table, err := findCreateTable(string(sqlBytes), cfg.Table)
+	table, err := findCreateTable(schema, cfg.Table)
 	if err != nil {
 		return err
 	}
@@ -119,6 +120,36 @@ func run(cfg Config) error {
 	fmt.Printf("generated domain %q for table %s.%s\n", domain.PackageName, table.Schema, table.Name)
 	fmt.Println("next: add queries to", filepath.Join(baseDir, "postgresql", "query.sql"))
 	return nil
+}
+
+// readSchema 파일이면 그대로, 디렉터리면 goose 마이그레이션들의 Up 구간을 이름 순으로 이어 붙인다.
+func readSchema(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		b, err := os.ReadFile(path)
+		return string(b), err
+	}
+
+	files, err := filepath.Glob(filepath.Join(path, "*.sql"))
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(files)
+
+	var b strings.Builder
+	for _, f := range files {
+		content, err := os.ReadFile(f)
+		if err != nil {
+			return "", err
+		}
+		up, _, _ := strings.Cut(string(content), "-- +goose Down")
+		b.WriteString(up)
+		b.WriteString("\n")
+	}
+	return b.String(), nil
 }
 
 func readModulePath(path string) (string, error) {
