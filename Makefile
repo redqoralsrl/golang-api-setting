@@ -5,6 +5,8 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 
 # .env 파일을 환경변수로 올린 뒤 명령을 실행한다
 WITH_ENV = set -a && . ./$(ENV_FILE) && set +a &&
+# compose 변수(${DB_USER} 등)도 같은 파일에서 읽는다
+COMPOSE  = docker compose --env-file $(ENV_FILE)
 
 .DEFAULT_GOAL := help
 .PHONY: help dev run local-run db-up down logs \
@@ -23,16 +25,16 @@ run: ## 로컬에서 한 번 실행
 	$(WITH_ENV) go run ./cmd/api
 
 local-run: ## docker compose 로 API + DB 실행 후 로그 보기
-	docker compose --env-file $(ENV_FILE) up -d --build && docker compose logs -f api
+	$(COMPOSE) up -d --build && $(COMPOSE) logs -f api
 
 db-up: ## DB 컨테이너만 실행
-	docker compose --env-file $(ENV_FILE) up -d db
+	$(COMPOSE) up -d db
 
 down: ## compose 컨테이너 중지 (데이터 볼륨은 유지. 지우려면 docker compose down -v)
-	docker compose --env-file $(ENV_FILE) down
+	$(COMPOSE) down
 
 logs: ## compose 로그
-	docker compose logs -f
+	$(COMPOSE) logs -f
 
 ## ---------- DB 마이그레이션 ----------
 migrate-up: ## 아직 적용 안 된 마이그레이션 모두 적용
