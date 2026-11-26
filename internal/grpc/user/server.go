@@ -1,3 +1,5 @@
+//go:build grpc
+
 package usergrpc
 
 import (
@@ -17,14 +19,14 @@ func NewServer(userService user.UseCase) *Server {
 }
 
 func (s *Server) CreateUser(ctx context.Context, req *userv1.CreateUserRequest) (*userv1.CreateUserResponse, error) {
-	createdUser, err := s.userService.Create(ctx, req.Email, req.Password)
+	result, err := s.userService.Create(ctx, req.Email, req.Password)
 	if err != nil {
 		return nil, err
 	}
 
 	return &userv1.CreateUserResponse{
-		Id:          int64(createdUser.ID),
-		Email:       createdUser.Email,
-		AccessToken: createdUser.AccessToken,
+		Id:          int64(result.User.ID),
+		Email:       result.User.Email,
+		AccessToken: result.AccessToken,
 	}, nil
 }

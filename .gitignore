@@ -1,7 +1,13 @@
-.env.local
-.evn.development
-.env.production
+# env (템플릿만 커밋)
+.env*
+!.env.template
+
+# 빌드·실행 산출물
 /tmp
-data
 /cmd/api/tmp
+/bin
+data
+coverage.out
+coverage.html
+
 .DS_Store

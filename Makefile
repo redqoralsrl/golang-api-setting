@@ -14,7 +14,7 @@ help: ## This help dialog.
 	done
 
 create-swagger: ## Create swagger documentation
-	go tool swag init -g ./internal/http/chi/api_handler.go -o ./docs/api --parseDependency --parseInternal --instanceName api --tags Users
+	go tool swag init -g ./internal/http/chi/api_handler.go -o ./docs/api --parseDependency --parseInternal --instanceName api
 
 test: ## Run tests
 	go test -v ./...

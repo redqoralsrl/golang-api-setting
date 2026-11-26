@@ -3,10 +3,12 @@ package user
 import (
 	"context"
 	"database/sql"
-	"go-template/internal/database/postgresql"
-	"go-template/internal/http/chi/middleware"
-	"go-template/internal/logger"
 	"strconv"
+	"strings"
+
+	"go-template/internal/auth"
+	"go-template/internal/database/postgresql"
+	"go-template/internal/logger"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -21,49 +23,41 @@ type Service struct {
 var _ UseCase = (*Service)(nil)
 
 func NewService(r Repository, j JwtAdapter, tm postgresql.DBTransactionManager, logger logger.Logger) *Service {
-	service := &Service{
+	return &Service{
 		repo:               r,
 		jwtAdapter:         j,
 		transactionManager: tm,
 		logger:             logger,
 	}
-
-	return service
 }
 
-func (s *Service) Create(ctx context.Context, email, password string) (*User, error) {
+func (s *Service) Create(ctx context.Context, email, password string) (*AuthResult, error) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, NewAuthError("hash admin password", err)
+		return nil, NewAuthError("hash user password", err)
 	}
 
 	var user *User
-	if err := s.transactionManager.WithTransaction(ctx, sql.LevelReadCommitted, false, func(txCtx context.Context) error {
-		user, err = s.repo.Create(txCtx, email, string(passwordHash))
+	// 가입과 첫 로그인 기록은 함께 성공하거나 함께 실패한다.
+	// (Postgres 는 트랜잭션 안 쿼리가 하나라도 실패하면 이후 Commit 도 실패하므로 에러를 무시할 수 없다)
+	err = s.transactionManager.WithTransaction(ctx, sql.LevelReadCommitted, false, func(txCtx context.Context) error {
+		user, err = s.repo.Create(txCtx, strings.ToLower(strings.TrimSpace(email)), string(passwordHash))
 		if err != nil {
-			s.logger.Error("failed to create user", logger.Field{Key: "error", Value: err.Error()})
-			return NewDatabaseError("create user", err)
+			return err
 		}
-
-		accessToken, err := s.jwtAdapter.GenerateToken(strconv.Itoa(user.ID), string(middleware.UserRole), middleware.UserExpired)
-		if err != nil {
-			return NewJwtError(user.Email, err)
+		if err := s.repo.CreateLoginLog(txCtx, user.ID); err != nil {
+			return NewDatabaseError("create user login log", err)
 		}
-
-		user.AccessToken = accessToken
-
-		err = s.repo.CreateLoginLog(txCtx, user.ID)
-		if err != nil {
-			s.logger.Error("failed to create user login log", logger.Field{Key: "error", Value: err.Error()})
-		}
-
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	UsersCreatedTotal.Inc()
-	UsersLoginTotal.Inc()
+	accessToken, err := s.jwtAdapter.GenerateToken(strconv.Itoa(user.ID), string(auth.RoleUser), auth.UserTokenTTL)
+	if err != nil {
+		return nil, NewJwtError(user.Email, err)
+	}
 
-	return user, nil
+	return &AuthResult{User: user, AccessToken: accessToken}, nil
 }

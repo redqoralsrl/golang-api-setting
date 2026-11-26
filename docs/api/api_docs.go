@@ -77,7 +77,7 @@ const docTemplateapi = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/go-template_domain_user.User"
+                                            "$ref": "#/definitions/go-template_domain_user.AuthResult"
                                         }
                                     }
                                 }
@@ -113,12 +113,20 @@ const docTemplateapi = `{
         }
     },
     "definitions": {
-        "go-template_domain_user.User": {
+        "go-template_domain_user.AuthResult": {
             "type": "object",
             "properties": {
                 "access_token": {
                     "type": "string"
                 },
+                "user": {
+                    "$ref": "#/definitions/go-template_domain_user.User"
+                }
+            }
+        },
+        "go-template_domain_user.User": {
+            "type": "object",
+            "properties": {
                 "created_at": {
                     "type": "string"
                 },
@@ -127,9 +135,6 @@ const docTemplateapi = `{
                 },
                 "id": {
                     "type": "integer"
-                },
-                "password_hash": {
-                    "type": "string"
                 },
                 "updated_at": {
                     "type": "string"
@@ -147,9 +152,10 @@ const docTemplateapi = `{
                 "unauthorized",
                 "invalid input",
                 "forbidden",
+                "payload too large",
                 "service unavailable",
-                "Database Error",
-                "Internal Server Error"
+                "database error",
+                "internal server error"
             ],
             "x-enum-varnames": [
                 "Success",
@@ -160,6 +166,7 @@ const docTemplateapi = `{
                 "UnAuthorized",
                 "InvalidInput",
                 "Forbidden",
+                "PayloadTooLarge",
                 "ServiceUnavailable",
                 "DatabaseError",
                 "InternalError"
@@ -175,8 +182,26 @@ const docTemplateapi = `{
                 "error": {
                     "type": "string"
                 },
+                "errors": {
+                    "description": "입력 검증 실패 시 필드별 사유",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/go-template_internal_validator.ErrorResponse"
+                    }
+                },
                 "message": {
                     "$ref": "#/definitions/go-template_internal_http.Message"
+                }
+            }
+        },
+        "go-template_internal_validator.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -188,10 +213,13 @@ const docTemplateapi = `{
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "password": {
+                    "description": "bcrypt 는 72바이트까지만 쓴다",
                     "type": "string",
+                    "maxLength": 72,
                     "minLength": 8
                 }
             }

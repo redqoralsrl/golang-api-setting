@@ -60,8 +60,8 @@ func (m *Manager) WithTransaction(ctx context.Context, isolationLevel sql.Isolat
 	defer func() {
 		if p := recover(); p != nil {
 			_ = tx.Rollback()
-			fmt.Println(p)
-			//panic(p)
+			// 삼키면 롤백됐는데 nil 이 반환된다. 다시 던져 RecoveryMiddleware 가 500 으로 처리하게 한다.
+			panic(p)
 		}
 	}()
 

@@ -7,7 +7,6 @@ import (
 	"go-template/config"
 	"go-template/internal/database/postgresql/gen"
 	"go-template/internal/logger"
-	"go-template/internal/metrics"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -70,8 +69,6 @@ func NewDB(config *config.Config, l logger.Logger) (*Database, error) {
 					cursor:  cursorInstance,
 					done:    make(chan struct{}),
 				}
-				database.recordStats()
-				go database.observeStats(10 * time.Second)
 
 				return database, nil
 			}
@@ -94,22 +91,8 @@ func (d *Database) Close() error {
 	return d.Querier.(*sql.DB).Close()
 }
 
-func (d *Database) observeStats(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			d.recordStats()
-		case <-d.done:
-			return
-		}
-	}
-}
-
-func (d *Database) recordStats() {
-	metrics.RecordDatabaseStats(d.Querier.(*sql.DB).Stats())
+func (d *Database) Ping(ctx context.Context) error {
+	return d.Querier.(*sql.DB).PingContext(ctx)
 }
 
 func (d *Database) GetQueryRowerFromContext(ctx context.Context) *Database {
